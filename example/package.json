@@ -1,0 +1,24 @@
+{
+  "name": "electron-live-update-example",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Example app for @capawesome/electron-live-update.",
+  "author": "Robin Genz <mail@robingenz.dev>",
+  "license": "MIT",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "npm run build:renderer && npm run build:main && npm run build:bundles",
+    "build:renderer": "vite build",
+    "build:main": "esbuild src/main.ts src/preload.ts --bundle --platform=node --external:electron --outdir=dist/main",
+    "build:bundles": "node scripts/build-bundles.mjs",
+    "mock-server": "node scripts/mock-server.mjs",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@capawesome/electron-live-update": "file:.."
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "vite": "^7.0.0"
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "name": "@capawesome/electron-live-update",
+  "version": "0.0.1",
+  "description": "Electron SDK for over-the-air web bundle updates backed by Capawesome Cloud.",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./preload": {
+      "types": "./dist/preload/index.d.ts",
+      "import": "./dist/preload/index.mjs",
+      "require": "./dist/preload/index.js"
+    },
+    "./renderer": {
+      "types": "./dist/renderer/index.d.ts",
+      "import": "./dist/renderer/index.mjs",
+      "require": "./dist/renderer/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.mjs",
+      "require": "./dist/engine/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "author": "Robin Genz <mail@robingenz.dev>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/capawesome-team/electron-live-update.git"
+  },
+  "bugs": {
+    "url": "https://github.com/capawesome-team/electron-live-update/issues"
+  },
+  "funding": [
+    {
+      "type": "github",
+      "url": "https://github.com/sponsors/capawesome-team/"
+    },
+    {
+      "type": "opencollective",
+      "url": "https://opencollective.com/capawesome"
+    }
+  ],
+  "homepage": "https://github.com/capawesome-team/electron-live-update",
+  "keywords": [
+    "electron",
+    "live update",
+    "live-update",
+    "ota",
+    "over-the-air",
+    "code push",
+    "hot update",
+    "auto update",
+    "bundle",
+    "rollback",
+    "capawesome",
+    "capawesome cloud"
+  ],
+  "workspaces": [
+    "example"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsup",
+    "watch": "tsup --watch",
+    "lint": "npm run eslint && npm run prettier -- --check",
+    "fmt": "npm run eslint -- --fix && npm run prettier -- --write",
+    "eslint": "eslint src tests --ext ts",
+    "prettier": "prettier \"{src,tests,e2e,example/src,example/scripts}/**/*.{ts,mts,js,mjs,css,html}\" \"*.{md,json}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && npm run build --workspace example && node e2e/run.mjs",
+    "verify": "npm run build && npm run test",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "yauzl": "^3.2.0"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.0",
+    "@electron/asar": "^4.2.0",
+    "@ionic/eslint-config": "0.4.0",
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^20.19.0",
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^3.3.1",
+    "electron": "^43.1.0",
+    "eslint": "8.57.0",
+    "prettier": "^3.4.2",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "yazl": "^3.3.1"
+  },
+  "peerDependencies": {
+    "electron": ">=28.0.0"
+  },
+  "peerDependenciesMeta": {
+    "electron": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "eslintConfig": {
+    "extends": "@ionic/eslint-config/recommended"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  }
+}

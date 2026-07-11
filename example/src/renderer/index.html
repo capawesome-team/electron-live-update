@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live Update Example</title>
+  </head>
+  <body>
+    <main>
+      <h1>Live Update Example</h1>
+      <p>Bundle: <strong id="marker" data-testid="marker"></strong></p>
+      <dl>
+        <dt>Current bundle</dt>
+        <dd id="current-bundle" data-testid="current-bundle"></dd>
+        <dt>Next bundle</dt>
+        <dd id="next-bundle" data-testid="next-bundle"></dd>
+        <dt>Channel</dt>
+        <dd id="channel" data-testid="channel"></dd>
+        <dt>Device ID</dt>
+        <dd id="device-id" data-testid="device-id"></dd>
+        <dt>Blocked bundles</dt>
+        <dd id="blocked-bundles" data-testid="blocked-bundles"></dd>
+        <dt>Ready</dt>
+        <dd id="ready-state" data-testid="ready-state">-</dd>
+        <dt>Storage counter</dt>
+        <dd id="storage-counter" data-testid="storage-counter"></dd>
+        <dt>Download</dt>
+        <dd id="progress" data-testid="progress">-</dd>
+        <dt>Last error</dt>
+        <dd id="error" data-testid="error">-</dd>
+      </dl>
+      <div>
+        <button id="sync" data-testid="sync">Sync</button>
+        <button id="reload" data-testid="reload">Reload</button>
+        <button id="reset" data-testid="reset">Reset</button>
+      </div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

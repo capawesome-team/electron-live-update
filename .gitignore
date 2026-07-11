@@ -1,0 +1,9 @@
+plans/
+node_modules/
+dist/
+example/dist/
+example/out/
+e2e/.artifacts/
+test-results/
+*.log
+.DS_Store
