@@ -55,6 +55,7 @@ const DEFAULT_SCHEME = 'live-update';
 const SERVE_HOST = 'bundle';
 const AUTO_UPDATE_MIN_INTERVAL = 15 * 60 * 1000;
 const ELECTRON_PLATFORM = '2';
+const ELECTRON_RUNTIME = 'electron';
 
 const defaultLogger: LiveUpdateLogger = {
   debug: message => console.debug(`[LiveUpdate] ${message}`),
@@ -91,6 +92,7 @@ class LiveUpdateImpl implements LiveUpdate {
       platform: ELECTRON_PLATFORM,
       publicKey: config.publicKey,
       readyTimeout: config.readyTimeout,
+      runtime: ELECTRON_RUNTIME,
       sdkVersion: __SDK_VERSION__,
       serverDomain: config.serverDomain,
       versionCode: config.versionCode ?? app.getVersion(),

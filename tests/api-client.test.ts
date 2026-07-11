@@ -19,6 +19,7 @@ describe('CloudApiClient', () => {
     deviceId: 'device-1',
     osVersion: '25.5.0',
     platform: '2',
+    runtime: 'electron' as string | null,
     sdkVersion: '0.0.1',
   };
 
@@ -57,6 +58,7 @@ describe('CloudApiClient', () => {
     expect(params?.get('osVersion')).toBe('25.5.0');
     expect(params?.get('platform')).toBe('2');
     expect(params?.get('pluginVersion')).toBe('0.0.1');
+    expect(params?.get('runtime')).toBe('electron');
     expect([...(params?.keys() ?? [])].sort()).toEqual([
       'appVersionCode',
       'appVersionName',
@@ -67,6 +69,7 @@ describe('CloudApiClient', () => {
       'osVersion',
       'platform',
       'pluginVersion',
+      'runtime',
     ]);
     expect(recorded?.headers['x-capawesome-device-id']).toBe('device-1');
   });
@@ -83,11 +86,13 @@ describe('CloudApiClient', () => {
       bundleId: null,
       channelName: null,
       customId: null,
+      runtime: null,
     });
     const params = server.requests[0]?.url.searchParams;
     expect(params?.has('bundleId')).toBe(false);
     expect(params?.has('channelName')).toBe(false);
     expect(params?.has('customId')).toBe(false);
+    expect(params?.has('runtime')).toBe(false);
   });
 
   it('parses the full response', async () => {

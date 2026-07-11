@@ -60,6 +60,7 @@ describe('LiveUpdateEngine', () => {
       logger: silentLogger,
       osVersion: '25.0.0',
       platform: '2',
+      runtime: 'electron',
       sdkVersion: '0.0.1',
       serverDomain: server.origin.replace('http://', ''),
       versionCode: '1',
@@ -324,6 +325,9 @@ describe('LiveUpdateEngine', () => {
       await engine.sync();
       expect(server.requests[0]?.url.searchParams.get('channelName')).toBe(
         'stable',
+      );
+      expect(server.requests[0]?.url.searchParams.get('runtime')).toBe(
+        'electron',
       );
       await engine.setChannel({ channel: 'beta' });
       await engine.sync();

@@ -25,6 +25,7 @@ export interface FetchLatestBundleRequest {
   deviceId: string;
   osVersion: string;
   platform: string;
+  runtime: string | null;
   sdkVersion: string;
 }
 
@@ -89,6 +90,7 @@ export class CloudApiClient {
     this.appendQueryParameter(url, 'osVersion', request.osVersion);
     this.appendQueryParameter(url, 'platform', request.platform);
     this.appendQueryParameter(url, 'pluginVersion', request.sdkVersion);
+    this.appendQueryParameter(url, 'runtime', request.runtime);
     let response: Response;
     try {
       response = await fetch(url, {

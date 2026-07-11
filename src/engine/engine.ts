@@ -173,6 +173,16 @@ export interface LiveUpdateEngineConfig {
    */
   readyTimeout?: number;
   /**
+   * The runtime identifier reported to Capawesome Cloud.
+   *
+   * If not set, no runtime is reported and the server assumes its
+   * default runtime.
+   *
+   * @since 0.1.0
+   * @example 'electron'
+   */
+  runtime?: string;
+  /**
    * The version of the SDK reported to Capawesome Cloud.
    *
    * @since 0.1.0
@@ -288,6 +298,7 @@ export class LiveUpdateEngine {
   private readonly publicKey: string | undefined;
   private readonly readyTimeout: number;
   private rollbackPerformed = false;
+  private readonly runtime: string | null;
   private readonly sdkVersion: string;
   private readonly stateFile: StateFile;
   private readonly store: BundleStore;
@@ -308,6 +319,7 @@ export class LiveUpdateEngine {
     this.platform = config.platform;
     this.publicKey = config.publicKey;
     this.readyTimeout = config.readyTimeout ?? DEFAULT_READY_TIMEOUT;
+    this.runtime = config.runtime ?? null;
     this.sdkVersion = config.sdkVersion;
     this.versionCode = config.versionCode;
     this.versionName = config.versionName;
@@ -877,6 +889,7 @@ export class LiveUpdateEngine {
       deviceId: await this.getOrCreateDeviceId(),
       osVersion: this.osVersion,
       platform: this.platform,
+      runtime: this.runtime,
       sdkVersion: this.sdkVersion,
     });
   }
