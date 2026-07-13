@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { join } from 'node:path';
+import { copyFile, mkdir, readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import { CloudApiClient } from './api-client';
 import { BundleStore, assertValidBundleId } from './bundle-store';
@@ -8,6 +9,8 @@ import type {
   DeleteBundleOptions,
   DownloadBundleOptions,
   DownloadBundleProgressEvent,
+  FetchChannelsOptions,
+  FetchChannelsResult,
   FetchLatestBundleOptions,
   FetchLatestBundleResult,
   GetBlockedBundlesResult,
@@ -29,8 +32,14 @@ import type {
   SyncOptions,
   SyncResult,
 } from './definitions';
-import { downloadFile } from './download';
+import { downloadFile, withHrefQueryParameter } from './download';
 import { ErrorCode, LiveUpdateError, unknownError } from './errors';
+import {
+  MANIFEST_FILE_NAME,
+  parseManifest,
+  resolveManifestFilePath,
+  type ManifestItem,
+} from './manifest';
 import { StateFile } from './state-file';
 import {
   calculateContentChecksums,
@@ -111,6 +120,17 @@ export interface LiveUpdateEngineConfig {
    */
   dataDirectory: string;
   /**
+   * The absolute path to the directory containing the default bundle
+   * (the web assets packaged with the app).
+   *
+   * Used by `manifest` (delta) updates to reuse unchanged files of the
+   * packaged default bundle when it is the current bundle. If not set,
+   * a delta update on top of the default bundle downloads all files.
+   *
+   * @since 0.1.0
+   */
+  defaultBundlePath?: string;
+  /**
    * The default channel of the app.
    *
    * This can be overridden by `setChannel()` or the `channel` parameter
@@ -146,6 +166,17 @@ export interface LiveUpdateEngineConfig {
    * @since 0.1.0
    */
   platform: string;
+  /**
+   * The plugin version reported to Capawesome Cloud (the `pluginVersion`
+   * request parameter).
+   *
+   * Defaults to `sdkVersion`. The standalone Electron SDK reports the
+   * engine version; a Capacitor adapter reports the plugin package
+   * version.
+   *
+   * @since 0.1.0
+   */
+  pluginVersion?: string;
   /**
    * The public key to verify the integrity of the bundle.
    *
@@ -262,6 +293,14 @@ const DEFAULT_HTTP_TIMEOUT = 60000;
 const DEFAULT_READY_TIMEOUT = 0;
 const DEFAULT_SERVER_DOMAIN = 'api.cloud.capawesome.io';
 const MAX_BLOCKED_BUNDLES = 100;
+const DEFAULT_FETCH_CHANNELS_LIMIT = 50;
+const DEFAULT_FETCH_CHANNELS_OFFSET = 0;
+/**
+ * The maximum number of files downloaded in parallel for a `manifest`
+ * (delta) bundle. Mirrors OkHttp's default per-host limit used by the
+ * mobile plugins.
+ */
+const MANIFEST_DOWNLOAD_CONCURRENCY = 5;
 
 const defaultLogger: LiveUpdateLogger = {
   debug: message => console.debug(`[LiveUpdate] ${message}`),
@@ -288,6 +327,7 @@ export class LiveUpdateEngine {
   private readonly appId: string | null;
   private readonly autoBlockRolledBackBundles: boolean;
   private readonly autoDeleteBundles: boolean;
+  private readonly defaultBundlePath: string | null;
   private readonly defaultChannel: string | null;
   private readonly emitter = new EventEmitter();
   private readonly httpTimeout: number;
@@ -295,6 +335,7 @@ export class LiveUpdateEngine {
   private readonly logger: LiveUpdateLogger;
   private readonly osVersion: string;
   private readonly platform: string;
+  private readonly pluginVersion: string;
   private readonly publicKey: string | undefined;
   private readonly readyTimeout: number;
   private rollbackPerformed = false;
@@ -312,11 +353,13 @@ export class LiveUpdateEngine {
     this.autoBlockRolledBackBundles =
       config.autoBlockRolledBackBundles ?? false;
     this.autoDeleteBundles = config.autoDeleteBundles ?? false;
+    this.defaultBundlePath = config.defaultBundlePath ?? null;
     this.defaultChannel = config.defaultChannel ?? null;
     this.httpTimeout = config.httpTimeout ?? DEFAULT_HTTP_TIMEOUT;
     this.logger = config.logger ?? defaultLogger;
     this.osVersion = config.osVersion;
     this.platform = config.platform;
+    this.pluginVersion = config.pluginVersion ?? config.sdkVersion;
     this.publicKey = config.publicKey;
     this.readyTimeout = config.readyTimeout ?? DEFAULT_READY_TIMEOUT;
     this.runtime = config.runtime ?? null;
@@ -522,17 +565,18 @@ export class LiveUpdateEngine {
       }
       if (!(await this.store.has(bundleId))) {
         if (latest.artifactType === 'manifest') {
-          throw new LiveUpdateError(
-            ErrorCode.ArtifactTypeNotSupported,
-            'The manifest artifact type is not yet supported by this SDK.',
-          );
+          await this.downloadBundleOfTypeManifest({
+            bundleId,
+            url: latest.url,
+          });
+        } else {
+          await this.downloadBundleInternal({
+            bundleId,
+            checksum: latest.checksum,
+            signature: latest.signature,
+            url: latest.url,
+          });
         }
-        await this.downloadBundleInternal({
-          bundleId,
-          checksum: latest.checksum,
-          signature: latest.signature,
-          url: latest.url,
-        });
       }
       await this.setNextBundleInternal(bundleId);
       return { nextBundleId: bundleId };
@@ -566,6 +610,34 @@ export class LiveUpdateEngine {
   }
 
   /**
+   * Fetch the available channels using the [Capawesome Cloud](https://capawesome.io/cloud/).
+   *
+   * Only works for apps with public channels enabled (Channel
+   * Discovery). Throws `ChannelDiscoveryNotEnabled` otherwise.
+   *
+   * @since 0.1.0
+   */
+  public async fetchChannels(
+    options?: FetchChannelsOptions,
+  ): Promise<FetchChannelsResult> {
+    this.assertInitialized();
+    if (!this.appId) {
+      throw new LiveUpdateError(
+        ErrorCode.AppIdMissing,
+        'appId must be configured.',
+      );
+    }
+    const channels = await this.apiClient.getChannels({
+      appId: this.appId,
+      deviceId: await this.getOrCreateDeviceId(),
+      limit: options?.limit ?? DEFAULT_FETCH_CHANNELS_LIMIT,
+      offset: options?.offset ?? DEFAULT_FETCH_CHANNELS_OFFSET,
+      query: options?.query ?? null,
+    });
+    return { channels };
+  }
+
+  /**
    * Download a bundle.
    *
    * The download is verified (signature or checksum), extracted with
@@ -579,17 +651,18 @@ export class LiveUpdateEngine {
       throw new LiveUpdateError(ErrorCode.UrlMissing, 'url must be provided.');
     }
     assertValidBundleId(options.bundleId);
-    if (options.artifactType === 'manifest') {
-      throw new LiveUpdateError(
-        ErrorCode.ArtifactTypeNotSupported,
-        'The manifest artifact type is not yet supported by this SDK.',
-      );
-    }
     if (await this.store.has(options.bundleId)) {
       throw new LiveUpdateError(
         ErrorCode.BundleAlreadyExists,
         'bundle already exists.',
       );
+    }
+    if (options.artifactType === 'manifest') {
+      await this.downloadBundleOfTypeManifest({
+        bundleId: options.bundleId,
+        url: options.url,
+      });
+      return;
     }
     await this.downloadBundleInternal({
       bundleId: options.bundleId,
@@ -889,8 +962,8 @@ export class LiveUpdateEngine {
       deviceId: await this.getOrCreateDeviceId(),
       osVersion: this.osVersion,
       platform: this.platform,
+      pluginVersion: this.pluginVersion,
       runtime: this.runtime,
-      sdkVersion: this.sdkVersion,
     });
   }
 
@@ -944,6 +1017,257 @@ export class LiveUpdateEngine {
     } finally {
       await this.store.cleanUpStaging(stagingDirectory);
     }
+  }
+
+  /**
+   * Download and install a `manifest` (delta) bundle.
+   *
+   * Downloads the manifest, diffs it against the current bundle's
+   * per-file checksums, copies unchanged files locally and downloads
+   * only the missing/changed files (in parallel, fail-fast). Each
+   * downloaded file is verified with the same precedence as the zip
+   * path. The assembled directory is then installed atomically.
+   */
+  private async downloadBundleOfTypeManifest(options: {
+    bundleId: string;
+    url: string;
+  }): Promise<void> {
+    const stagingDirectory = await this.store.createStagingDirectory();
+    try {
+      const assembleDirectory = join(stagingDirectory, 'bundle');
+      await mkdir(assembleDirectory, { recursive: true });
+      // Download the manifest of the latest bundle.
+      const manifestFilePath = join(stagingDirectory, MANIFEST_FILE_NAME);
+      await downloadFile({
+        destinationPath: manifestFilePath,
+        httpTimeout: this.httpTimeout,
+        url: withHrefQueryParameter(options.url, MANIFEST_FILE_NAME),
+      });
+      const latestItems = parseManifest(
+        JSON.parse(await readFile(manifestFilePath, 'utf8')),
+      );
+      // Diff against the current bundle by checksum: copy the files that
+      // are unchanged, download the rest.
+      const currentChecksums = await this.getCurrentBundleChecksums();
+      const itemsToCopy: ManifestItem[] = [];
+      const itemsToDownload: ManifestItem[] = [];
+      if (currentChecksums === null) {
+        itemsToDownload.push(...latestItems);
+      } else {
+        const checksumToPath = new Map<string, string>();
+        for (const [path, checksum] of Object.entries(currentChecksums)) {
+          if (!checksumToPath.has(checksum)) {
+            checksumToPath.set(checksum, path);
+          }
+        }
+        for (const item of latestItems) {
+          if (checksumToPath.has(item.checksum)) {
+            itemsToCopy.push(item);
+          } else {
+            itemsToDownload.push(item);
+          }
+        }
+        const copyFailures = await this.copyManifestFiles(
+          itemsToCopy,
+          checksumToPath,
+          this.getCurrentBundleSourcePath(),
+          assembleDirectory,
+        );
+        // Files that could not be copied locally are downloaded instead.
+        itemsToDownload.push(...copyFailures);
+      }
+      // Download the missing/changed files in parallel with fail-fast.
+      await this.downloadManifestFiles(
+        options.url,
+        itemsToDownload,
+        assembleDirectory,
+        options.bundleId,
+      );
+      // Locate the bundle root and install atomically.
+      const bundleRoot = await findIndexHtmlDirectory(assembleDirectory);
+      if (!bundleRoot) {
+        throw new LiveUpdateError(
+          ErrorCode.BundleIndexHtmlMissing,
+          'The bundle does not contain an index.html file.',
+        );
+      }
+      const fileChecksums = await calculateContentChecksums(bundleRoot);
+      await this.store.add(options.bundleId, bundleRoot);
+      await this.stateFile.update(s => {
+        s.bundles[options.bundleId] = {
+          fileChecksums,
+          signed: this.publicKey !== undefined,
+        };
+      });
+    } catch (error) {
+      throw unknownError(error);
+    } finally {
+      await this.store.cleanUpStaging(stagingDirectory);
+    }
+  }
+
+  /**
+   * Return the per-file checksums (path -> SHA-256) of the current
+   * bundle, or `null` if none can be determined (in which case a delta
+   * update downloads all files).
+   */
+  private async getCurrentBundleChecksums(): Promise<{
+    [path: string]: string;
+  } | null> {
+    const currentBundleId = this.stateFile.get().currentBundleId;
+    if (currentBundleId !== null) {
+      const metadata = this.stateFile.get().bundles[currentBundleId];
+      if (metadata && Object.keys(metadata.fileChecksums).length > 0) {
+        return metadata.fileChecksums;
+      }
+      if (await this.store.has(currentBundleId)) {
+        return calculateContentChecksums(this.store.getPath(currentBundleId));
+      }
+      return null;
+    }
+    // The default bundle has no recorded checksums; compute them lazily.
+    if (this.defaultBundlePath) {
+      try {
+        return await calculateContentChecksums(this.defaultBundlePath);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Return the on-disk directory of the current bundle to copy
+   * unchanged files from, or `null` if the default bundle is active and
+   * no `defaultBundlePath` is configured.
+   */
+  private getCurrentBundleSourcePath(): string | null {
+    const currentBundleId = this.stateFile.get().currentBundleId;
+    if (currentBundleId !== null) {
+      return this.store.getPath(currentBundleId);
+    }
+    return this.defaultBundlePath;
+  }
+
+  /**
+   * Copy the given files from the current bundle into the assembly
+   * directory. Returns the items that could not be copied (missing on
+   * disk), so they can be downloaded instead.
+   */
+  private async copyManifestFiles(
+    items: ManifestItem[],
+    checksumToPath: Map<string, string>,
+    sourceDirectory: string | null,
+    destinationDirectory: string,
+  ): Promise<ManifestItem[]> {
+    const failures: ManifestItem[] = [];
+    for (const item of items) {
+      const sourceRelativePath = checksumToPath.get(item.checksum);
+      if (sourceDirectory === null || sourceRelativePath === undefined) {
+        failures.push(item);
+        continue;
+      }
+      try {
+        const destinationPath = resolveManifestFilePath(
+          destinationDirectory,
+          item.href,
+        );
+        await mkdir(dirname(destinationPath), { recursive: true });
+        await copyFile(
+          join(sourceDirectory, sourceRelativePath),
+          destinationPath,
+        );
+      } catch {
+        failures.push(item);
+      }
+    }
+    return failures;
+  }
+
+  /**
+   * Download the given files in parallel (bounded concurrency,
+   * fail-fast) and verify each one. Emits aggregated download progress
+   * across all files.
+   */
+  private async downloadManifestFiles(
+    baseUrl: string,
+    items: ManifestItem[],
+    destinationDirectory: string,
+    bundleId: string,
+  ): Promise<void> {
+    if (items.length === 0) {
+      this.emit('downloadBundleProgress', {
+        bundleId,
+        downloadedBytes: 0,
+        progress: 1,
+        totalBytes: 0,
+      });
+      return;
+    }
+    const totalBytes = items.reduce((sum, item) => sum + item.sizeInBytes, 0);
+    const downloadedPerFile = new Array<number>(items.length).fill(0);
+    const controller = new AbortController();
+    const emitProgress = (): void => {
+      const downloadedBytes = downloadedPerFile.reduce(
+        (sum, bytes) => sum + bytes,
+        0,
+      );
+      this.emit('downloadBundleProgress', {
+        bundleId,
+        downloadedBytes,
+        progress:
+          totalBytes > 0 ? Math.min(downloadedBytes / totalBytes, 1) : 1,
+        totalBytes,
+      });
+    };
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const index = nextIndex++;
+        if (index >= items.length) {
+          return;
+        }
+        const item = items[index] as ManifestItem;
+        const destinationPath = resolveManifestFilePath(
+          destinationDirectory,
+          item.href,
+        );
+        await mkdir(dirname(destinationPath), { recursive: true });
+        const result = await downloadFile({
+          destinationPath,
+          httpTimeout: this.httpTimeout,
+          onProgress: downloadedBytes => {
+            downloadedPerFile[index] = downloadedBytes;
+            emitProgress();
+          },
+          signal: controller.signal,
+          url: withHrefQueryParameter(baseUrl, item.href),
+        });
+        await verifyDownloadedFile({
+          checksum: result.checksum,
+          filePath: destinationPath,
+          publicKey: this.publicKey,
+          signature: result.signature,
+        });
+        // Account for the full file size even if no Content-Length was
+        // sent, so the aggregate progress reaches the total.
+        downloadedPerFile[index] = item.sizeInBytes;
+        emitProgress();
+      }
+    };
+    const workers = Array.from(
+      { length: Math.min(MANIFEST_DOWNLOAD_CONCURRENCY, items.length) },
+      () => worker(),
+    );
+    try {
+      await Promise.all(workers);
+    } catch (error) {
+      // Fail-fast: cancel the in-flight downloads and let them settle.
+      controller.abort();
+      await Promise.allSettled(workers);
+      throw error;
+    }
+    emitProgress();
   }
 
   private async setNextBundleInternal(bundleId: string | null): Promise<void> {

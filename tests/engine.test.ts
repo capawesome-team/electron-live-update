@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import type { IncomingMessage } from 'node:http';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type {
@@ -13,6 +14,7 @@ import {
   type LiveUpdateEngineConfig,
 } from '../src/engine/engine';
 import { ErrorCode } from '../src/engine/errors';
+import { MANIFEST_FILE_NAME } from '../src/engine/manifest';
 
 import {
   MockServer,
@@ -21,6 +23,7 @@ import {
   createTemporaryDirectory,
   generateRsaKeyPair,
   removeDirectory,
+  sha256Hex,
   signBytes,
 } from './helpers';
 
@@ -94,6 +97,81 @@ describe('LiveUpdateEngine', () => {
     });
   }
 
+  interface ManifestFile {
+    content: string;
+    href: string;
+  }
+
+  function manifestUrl(bundleId: string): string {
+    return `${server.origin}/manifest/${bundleId}`;
+  }
+
+  function hrefOf(request: IncomingMessage): string | null {
+    return new URL(request.url ?? '/', server.origin).searchParams.get('href');
+  }
+
+  /**
+   * Serve a `manifest` (delta) bundle: the manifest JSON under
+   * `?href=<manifest file>` and each file under `?href=<href>`.
+   */
+  function serveManifestBundle(
+    bundleId: string,
+    files: ManifestFile[],
+    options: { privateKeyPem?: string } = {},
+  ): void {
+    const manifest = files.map(file => ({
+      checksum: sha256Hex(file.content),
+      href: file.href,
+      sizeInBytes: Buffer.byteLength(file.content),
+    }));
+    server.route(`/manifest/${bundleId}`, request => {
+      const href = hrefOf(request);
+      if (href === MANIFEST_FILE_NAME) {
+        return {
+          body: JSON.stringify(manifest),
+          headers: { 'Content-Type': 'application/json' },
+        };
+      }
+      const file = files.find(entry => entry.href === href);
+      if (!file) {
+        return { body: 'Not found', status: 404 };
+      }
+      const bytes = Buffer.from(file.content, 'utf8');
+      const headers: Record<string, string> = options.privateKeyPem
+        ? { 'X-Signature': signBytes(bytes, options.privateKeyPem) }
+        : { 'X-Checksum': sha256Hex(bytes) };
+      return { body: bytes, headers };
+    });
+  }
+
+  function serveLatestManifestBundle(bundleId: string): void {
+    server.route('/v1/apps/app-123/bundles/latest', {
+      body: JSON.stringify({
+        artifactType: 'manifest',
+        bundleId,
+        url: manifestUrl(bundleId),
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  async function writeDefaultBundle(files: ManifestFile[]): Promise<string> {
+    const directory = await createTemporaryDirectory();
+    for (const file of files) {
+      const filePath = join(directory, file.href);
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(filePath, file.content, 'utf8');
+    }
+    return directory;
+  }
+
+  function requestedHrefs(): string[] {
+    return server.requests
+      .filter(recorded => recorded.url.pathname.startsWith('/manifest/'))
+      .map(recorded => recorded.url.searchParams.get('href'))
+      .filter((href): href is string => href !== null);
+  }
+
   describe('downloadBundle', () => {
     it('downloads, verifies and installs a bundle', async () => {
       const engine = createEngine();
@@ -147,18 +225,6 @@ describe('LiveUpdateEngine', () => {
           url: `${server.origin}/download/1.0.0.zip`,
         }),
       ).rejects.toMatchObject({ code: ErrorCode.BundleAlreadyExists });
-    });
-
-    it('rejects the manifest artifact type', async () => {
-      const engine = createEngine();
-      await engine.initialize();
-      await expect(
-        engine.downloadBundle({
-          artifactType: 'manifest',
-          bundleId: '1.0.0',
-          url: 'https://example.com/b',
-        }),
-      ).rejects.toMatchObject({ code: ErrorCode.ArtifactTypeNotSupported });
     });
 
     it('rejects a bundle with a checksum mismatch and leaves no traces', async () => {
@@ -698,6 +764,333 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       expect(await engine.isSyncing()).toEqual({ syncing: false });
+    });
+  });
+
+  describe('manifest (delta) bundles', () => {
+    async function readBundleFile(
+      bundleId: string,
+      href: string,
+    ): Promise<string> {
+      return readFile(
+        join(dataDirectory, 'bundles', bundleId, ...href.split('/')),
+        'utf8',
+      );
+    }
+
+    it('downloads every file on a first delta over the default bundle without a default path', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      serveManifestBundle('delta', [
+        { href: 'index.html', content: '<html>delta</html>' },
+        { href: 'assets/app.js', content: 'console.log("delta");' },
+      ]);
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'delta',
+        url: manifestUrl('delta'),
+      });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([
+        'delta',
+      ]);
+      expect(await readBundleFile('delta', 'index.html')).toBe(
+        '<html>delta</html>',
+      );
+      expect(requestedHrefs().sort()).toEqual(
+        [MANIFEST_FILE_NAME, 'assets/app.js', 'index.html'].sort(),
+      );
+    });
+
+    it('reuses unchanged files of the packaged default bundle (first delta on default)', async () => {
+      const defaultBundlePath = await writeDefaultBundle([
+        { href: 'index.html', content: '<html>v1</html>' },
+        { href: 'assets/app.js', content: 'shared-code' },
+      ]);
+      const engine = createEngine({ defaultBundlePath });
+      await engine.initialize();
+      serveManifestBundle('v2', [
+        { href: 'index.html', content: '<html>v2</html>' },
+        { href: 'assets/app.js', content: 'shared-code' },
+      ]);
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'v2',
+        url: manifestUrl('v2'),
+      });
+      // The changed index.html was downloaded, the unchanged app.js copied.
+      expect(await readBundleFile('v2', 'index.html')).toBe('<html>v2</html>');
+      expect(await readBundleFile('v2', 'assets/app.js')).toBe('shared-code');
+      expect(requestedHrefs()).not.toContain('assets/app.js');
+      expect(requestedHrefs()).toContain('index.html');
+      await removeDirectory(defaultBundlePath);
+    });
+
+    it('reuses unchanged files of a previously installed bundle', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      const baseZip = await buildZip([
+        { path: 'index.html', content: '<html>base</html>' },
+        { path: 'assets/app.js', content: 'shared-code' },
+      ]);
+      server.route('/download/base.zip', { body: baseZip });
+      await engine.downloadBundle({
+        bundleId: 'base',
+        url: `${server.origin}/download/base.zip`,
+      });
+      await engine.setNextBundle({ bundleId: 'base' });
+      await engine.applyNextBundle();
+      serveManifestBundle('next', [
+        { href: 'index.html', content: '<html>next</html>' },
+        { href: 'assets/app.js', content: 'shared-code' },
+      ]);
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'next',
+        url: manifestUrl('next'),
+      });
+      expect(await readBundleFile('next', 'index.html')).toBe(
+        '<html>next</html>',
+      );
+      expect(await readBundleFile('next', 'assets/app.js')).toBe('shared-code');
+      expect(requestedHrefs()).not.toContain('assets/app.js');
+    });
+
+    it('emits aggregated download progress across files', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      const files = [
+        { href: 'index.html', content: '<html>delta</html>' },
+        { href: 'assets/app.js', content: 'console.log("delta");' },
+      ];
+      serveManifestBundle('delta', files);
+      const progressEvents: DownloadBundleProgressEvent[] = [];
+      engine.on('downloadBundleProgress', event => progressEvents.push(event));
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'delta',
+        url: manifestUrl('delta'),
+      });
+      expect(progressEvents.length).toBeGreaterThan(0);
+      const lastEvent = progressEvents[progressEvents.length - 1];
+      expect(lastEvent?.bundleId).toBe('delta');
+      expect(lastEvent?.progress).toBe(1);
+      const expectedTotal = files.reduce(
+        (sum, file) => sum + Buffer.byteLength(file.content),
+        0,
+      );
+      expect(lastEvent?.totalBytes).toBe(expectedTotal);
+      expect(lastEvent?.downloadedBytes).toBe(expectedTotal);
+    });
+
+    it('verifies each file signature with the configured public key', async () => {
+      const { privateKeyPem, publicKeyPem } = generateRsaKeyPair();
+      const engine = createEngine({ publicKey: publicKeyPem });
+      await engine.initialize();
+      serveManifestBundle(
+        'signed',
+        [
+          { href: 'index.html', content: '<html>signed</html>' },
+          { href: 'assets/app.js', content: 'console.log("signed");' },
+        ],
+        { privateKeyPem },
+      );
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'signed',
+        url: manifestUrl('signed'),
+      });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([
+        'signed',
+      ]);
+    });
+
+    it('rejects a delta with an invalid per-file signature', async () => {
+      const { privateKeyPem, publicKeyPem } = generateRsaKeyPair();
+      const engine = createEngine({ publicKey: publicKeyPem });
+      await engine.initialize();
+      const manifest = [
+        {
+          checksum: sha256Hex('<html>ok</html>'),
+          href: 'index.html',
+          sizeInBytes: Buffer.byteLength('<html>ok</html>'),
+        },
+      ];
+      server.route('/manifest/tampered', request => {
+        const href = hrefOf(request);
+        if (href === MANIFEST_FILE_NAME) {
+          return { body: JSON.stringify(manifest) };
+        }
+        // Serve tampered content with a signature of different bytes.
+        return {
+          body: '<html>evil</html>',
+          headers: {
+            'X-Signature': signBytes(Buffer.from('other'), privateKeyPem),
+          },
+        };
+      });
+      await expect(
+        engine.downloadBundle({
+          artifactType: 'manifest',
+          bundleId: 'tampered',
+          url: manifestUrl('tampered'),
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.SignatureVerificationFailed });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
+    });
+
+    it('fails fast when a file cannot be downloaded and leaves no traces', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      const manifest = [
+        {
+          checksum: sha256Hex('a'),
+          href: 'index.html',
+          sizeInBytes: 1,
+        },
+        {
+          checksum: sha256Hex('b'),
+          href: 'missing.js',
+          sizeInBytes: 1,
+        },
+      ];
+      server.route('/manifest/broken', request => {
+        const href = hrefOf(request);
+        if (href === MANIFEST_FILE_NAME) {
+          return { body: JSON.stringify(manifest) };
+        }
+        if (href === 'index.html') {
+          return { body: 'a', headers: { 'X-Checksum': sha256Hex('a') } };
+        }
+        return { body: 'Not found', status: 404 };
+      });
+      await expect(
+        engine.downloadBundle({
+          artifactType: 'manifest',
+          bundleId: 'broken',
+          url: manifestUrl('broken'),
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.DownloadFailed });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
+    });
+
+    it('rejects a delta without an index.html file', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      serveManifestBundle('noindex', [
+        { href: 'assets/app.js', content: 'console.log("x");' },
+      ]);
+      await expect(
+        engine.downloadBundle({
+          artifactType: 'manifest',
+          bundleId: 'noindex',
+          url: manifestUrl('noindex'),
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.BundleIndexHtmlMissing });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
+    });
+
+    it('syncs a manifest bundle end to end', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      serveManifestBundle('3.0.0', [
+        { href: 'index.html', content: '<html>3.0.0</html>' },
+      ]);
+      serveLatestManifestBundle('3.0.0');
+      const result = await engine.sync();
+      expect(result).toEqual({ nextBundleId: '3.0.0' });
+      expect((await engine.getNextBundle()).bundleId).toBe('3.0.0');
+      expect(await readBundleFile('3.0.0', 'index.html')).toBe(
+        '<html>3.0.0</html>',
+      );
+    });
+  });
+
+  describe('fetchChannels', () => {
+    it('returns the channels', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      server.route('/v1/apps/app-123/channels', {
+        body: JSON.stringify([
+          { id: 'c1', name: 'production' },
+          { id: 'c2', name: 'beta' },
+        ]),
+      });
+      const result = await engine.fetchChannels();
+      expect(result).toEqual({
+        channels: [
+          { id: 'c1', name: 'production' },
+          { id: 'c2', name: 'beta' },
+        ],
+      });
+    });
+
+    it('sends the default and overridden pagination parameters', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      server.route('/v1/apps/app-123/channels', { body: '[]' });
+      await engine.fetchChannels();
+      let params = server.requests[0]?.url.searchParams;
+      expect(params?.get('limit')).toBe('50');
+      expect(params?.get('offset')).toBe('0');
+      expect(params?.has('query')).toBe(false);
+      await engine.fetchChannels({ limit: 5, offset: 10, query: 'prod' });
+      params = server.requests[1]?.url.searchParams;
+      expect(params?.get('limit')).toBe('5');
+      expect(params?.get('offset')).toBe('10');
+      expect(params?.get('query')).toBe('prod');
+    });
+
+    it('throws CHANNEL_DISCOVERY_NOT_ENABLED on 401', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      server.route('/v1/apps/app-123/channels', {
+        body: 'unauthorized',
+        status: 401,
+      });
+      await expect(engine.fetchChannels()).rejects.toMatchObject({
+        code: ErrorCode.ChannelDiscoveryNotEnabled,
+        message:
+          'Unauthorized. Channel Discovery may not be enabled for this app.',
+      });
+    });
+
+    it('requires an appId', async () => {
+      const engine = createEngine({ appId: undefined });
+      await engine.initialize();
+      await expect(engine.fetchChannels()).rejects.toMatchObject({
+        code: ErrorCode.AppIdMissing,
+      });
+    });
+  });
+
+  describe('injectable runtime and pluginVersion', () => {
+    it('defaults pluginVersion to the SDK version', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      server.route('/v1/apps/app-123/bundles/latest', {
+        body: 'no',
+        status: 404,
+      });
+      await engine.sync();
+      expect(server.requests[0]?.url.searchParams.get('pluginVersion')).toBe(
+        '0.0.1',
+      );
+    });
+
+    it('sends the injected pluginVersion and runtime', async () => {
+      const engine = createEngine({
+        pluginVersion: '8.4.0',
+        runtime: 'capacitor',
+      });
+      await engine.initialize();
+      server.route('/v1/apps/app-123/bundles/latest', {
+        body: 'no',
+        status: 404,
+      });
+      await engine.sync();
+      const params = server.requests[0]?.url.searchParams;
+      expect(params?.get('pluginVersion')).toBe('8.4.0');
+      expect(params?.get('runtime')).toBe('capacitor');
     });
   });
 

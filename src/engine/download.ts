@@ -37,7 +37,23 @@ export interface DownloadFileOptions {
   destinationPath: string;
   httpTimeout: number;
   onProgress?: (downloadedBytes: number, totalBytes: number) => void;
+  /**
+   * An optional external signal to abort the download (e.g. to cancel
+   * sibling downloads when one of a parallel batch fails).
+   */
+  signal?: AbortSignal;
   url: string;
+}
+
+/**
+ * Append an `href` query parameter to a (pre-signed) bundle URL,
+ * preserving any existing query parameters. Used to request individual
+ * files of a `manifest` (delta) bundle.
+ */
+export function withHrefQueryParameter(baseUrl: string, href: string): string {
+  const url = assertSecureUrl(baseUrl);
+  url.searchParams.append('href', href);
+  return url.toString();
 }
 
 export interface DownloadFileResult {
@@ -59,11 +75,13 @@ export async function downloadFile(
   options: DownloadFileOptions,
 ): Promise<DownloadFileResult> {
   const url = assertSecureUrl(options.url);
+  const timeoutSignal = AbortSignal.timeout(options.httpTimeout);
+  const signal = options.signal
+    ? AbortSignal.any([timeoutSignal, options.signal])
+    : timeoutSignal;
   let response: Response;
   try {
-    response = await fetch(url, {
-      signal: AbortSignal.timeout(options.httpTimeout),
-    });
+    response = await fetch(url, { signal });
   } catch (error) {
     throw toRequestError(error);
   }

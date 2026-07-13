@@ -15,6 +15,8 @@ import type {
   DeleteBundleOptions,
   DownloadBundleOptions,
   DownloadBundleProgressListener,
+  FetchChannelsOptions,
+  FetchChannelsResult,
   FetchLatestBundleOptions,
   FetchLatestBundleResult,
   GetBlockedBundlesResult,
@@ -31,6 +33,7 @@ import type {
   NextBundleSetListener,
   ReadyResult,
   ReloadedListener,
+  RolledBackListener,
   SetChannelOptions,
   SetCustomIdOptions,
   SetNextBundleOptions,
@@ -85,6 +88,7 @@ class LiveUpdateImpl implements LiveUpdate {
       autoDeleteBundles: config.autoDeleteBundles,
       dataDirectory:
         config.dataDirectory ?? join(app.getPath('userData'), 'live-update'),
+      defaultBundlePath: config.defaultBundlePath,
       defaultChannel: config.defaultChannel,
       httpTimeout: config.httpTimeout,
       logger: this.logger,
@@ -112,6 +116,7 @@ class LiveUpdateImpl implements LiveUpdate {
             : `bundle '${event.currentBundleId}'`
         }.`,
       );
+      this.emitEvent('rolledBack', event);
       void this.reloadAttachedWindows().catch(error =>
         this.logger.error(
           `Failed to reload after rollback: ${this.describeError(error)}`,
@@ -206,6 +211,13 @@ class LiveUpdateImpl implements LiveUpdate {
   public async sync(options?: SyncOptions): Promise<SyncResult> {
     await this.initialization;
     return this.engine.sync(options);
+  }
+
+  public async fetchChannels(
+    options?: FetchChannelsOptions,
+  ): Promise<FetchChannelsResult> {
+    await this.initialization;
+    return this.engine.fetchChannels(options);
   }
 
   public async fetchLatestBundle(
@@ -311,6 +323,10 @@ class LiveUpdateImpl implements LiveUpdate {
   public addListener(
     eventName: 'reloaded',
     listener: ReloadedListener,
+  ): ListenerHandle;
+  public addListener(
+    eventName: 'rolledBack',
+    listener: RolledBackListener,
   ): ListenerHandle;
   public addListener(
     eventName: IpcEvent,
@@ -461,6 +477,8 @@ class LiveUpdateImpl implements LiveUpdate {
         return this.deleteBundle(options as DeleteBundleOptions);
       case 'downloadBundle':
         return this.downloadBundle(options as DownloadBundleOptions);
+      case 'fetchChannels':
+        return this.fetchChannels(options as FetchChannelsOptions | undefined);
       case 'fetchLatestBundle':
         return this.fetchLatestBundle(
           options as FetchLatestBundleOptions | undefined,

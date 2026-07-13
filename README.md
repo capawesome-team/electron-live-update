@@ -10,7 +10,8 @@ This SDK speaks the same protocol and the same vocabulary as the [`@capawesome/c
 - 🛟 **Kill-safe rollback**: A pending-boot marker and boot counter are persisted to disk _before_ a new bundle loads. If the app crashes, hangs or is killed during boot — even by a power loss — the next start automatically reverts to the last bundle that worked and optionally blocks the broken one.
 - 🔒 **Signature verification**: RSA signature verification of every downloaded bundle (`publicKey`), plus checksum re-verification of the installed bundle at activation time — tampering after download is detected too.
 - 🌐 **Stable origin serving**: A privileged custom scheme serves the active bundle under a constant origin, so `localStorage`, IndexedDB and service workers survive bundle switches. A simple path-based mode is available as an alternative.
-- 🚦 **Channels**: Deliver different bundles to different user groups (production, beta, staged rollouts).
+- 🚦 **Channels**: Deliver different bundles to different user groups (production, beta, staged rollouts), and discover them at runtime with `fetchChannels()`.
+- 🧩 **Delta updates**: The `manifest` artifact type downloads only the files that changed and reuses the rest from the current bundle — smaller, faster updates.
 - 📂 **Multiple bundles**: Download, manage and switch between bundles programmatically.
 - 🔁 **Background updates**: Optional automatic sync at app start, on focus and on resume.
 - 🔐 **Secure by default**: HTTPS-only downloads (localhost exempt for development), zip-slip protection, atomic bundle installation.
@@ -204,19 +205,20 @@ const { currentBundleId } = await engine.initialize(); // BEFORE loading web con
 
 The API mirrors [`@capawesome/capacitor-live-update`](https://capawesome.io/plugins/live-update/). Differences that exist are deliberate and listed here:
 
-| Aspect                           | Capacitor plugin                        | This SDK                                                                  |
-| -------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
-| `readyTimeout` default           | `0` (disabled)                          | `0` (disabled) — same default, same recommendation to set `10000`         |
-| Rollback target                  | Default bundle                          | **Last successful bundle**, then default — desktop has no store reinstall |
-| Kill-safe boot rollback          | —                                       | Pending-boot marker on disk, checked at every process start               |
-| Activation-time verification     | —                                       | Installed bundles re-verified against install-time checksums              |
-| Rollback blocking                | On `ready()`                            | At rollback time (survives a kill before `ready()`)                       |
-| Configuration                    | Capacitor config file                   | `createLiveUpdate()` options                                              |
-| `versionCode` / `versionName`    | Native app version                      | `app.getVersion()` unless configured                                      |
-| Device ID                        | Random UUID (Android) / vendor ID (iOS) | Random UUID, persisted per app ID                                         |
-| Serving                          | Capacitor WebView                       | `serve()` custom scheme or `getCurrentBundlePath()`                       |
-| `fetchChannels()`, `setConfig()` | Available                               | Not yet available                                                         |
-| `manifest` artifact type         | Available (delta updates)               | Not yet available (`zip` only)                                            |
+| Aspect                        | Capacitor plugin                        | This SDK                                                                  |
+| ----------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
+| `readyTimeout` default        | `0` (disabled)                          | `0` (disabled) — same default, same recommendation to set `10000`         |
+| Rollback target               | Default bundle                          | **Last successful bundle**, then default — desktop has no store reinstall |
+| Kill-safe boot rollback       | —                                       | Pending-boot marker on disk, checked at every process start               |
+| Activation-time verification  | —                                       | Installed bundles re-verified against install-time checksums              |
+| Rollback blocking             | On `ready()`                            | At rollback time (survives a kill before `ready()`)                       |
+| Configuration                 | Capacitor config file                   | `createLiveUpdate()` options                                              |
+| `versionCode` / `versionName` | Native app version                      | `app.getVersion()` unless configured                                      |
+| Device ID                     | Random UUID (Android) / vendor ID (iOS) | Random UUID, persisted per app ID                                         |
+| Serving                       | Capacitor WebView                       | `serve()` custom scheme or `getCurrentBundlePath()`                       |
+| `setConfig()`                 | Available                               | Not available                                                             |
+| `fetchChannels()`             | Available                               | **Available**                                                             |
+| `manifest` artifact type      | Available (delta updates)               | **Available** (delta updates)                                             |
 
 ## API
 
@@ -247,7 +249,7 @@ Creates the SDK. Call once, early in your main process (before `app.whenReady()`
 
 The returned `LiveUpdate` object implements the shared vocabulary — the same methods you know from the Capacitor plugin:
 
-`clearBlockedBundles()`, `deleteBundle(options)`, `downloadBundle(options)`, `fetchLatestBundle(options?)`, `getBlockedBundles()`, `getChannel()`, `getCurrentBundle()`, `getCustomId()`, `getDeviceId()`, `getDownloadedBundles()`, `getNextBundle()`, `getVersionCode()`, `getVersionName()`, `isSyncing()`, `ready()`, `reload()`, `reset()`, `setChannel(options)`, `setCustomId(options)`, `setNextBundle(options)`, `sync(options?)`, `addListener(eventName, listener)`, `removeAllListeners()`
+`clearBlockedBundles()`, `deleteBundle(options)`, `downloadBundle(options)`, `fetchChannels(options?)`, `fetchLatestBundle(options?)`, `getBlockedBundles()`, `getChannel()`, `getCurrentBundle()`, `getCustomId()`, `getDeviceId()`, `getDownloadedBundles()`, `getNextBundle()`, `getVersionCode()`, `getVersionName()`, `isSyncing()`, `ready()`, `reload()`, `reset()`, `setChannel(options)`, `setCustomId(options)`, `setNextBundle(options)`, `sync(options?)`, `addListener(eventName, listener)`, `removeAllListeners()`
 
 plus the Electron-specific serving integration:
 
@@ -260,11 +262,12 @@ All options and results use the exact same shapes as the Capacitor plugin (`Sync
 
 #### Events
 
-| Event                    | Payload                                               | Emitted when                        |
-| ------------------------ | ----------------------------------------------------- | ----------------------------------- |
-| `downloadBundleProgress` | `{ bundleId, downloadedBytes, progress, totalBytes }` | A bundle download makes progress    |
-| `nextBundleSet`          | `{ bundleId }`                                        | A bundle is set as the next bundle  |
-| `reloaded`               | –                                                     | The app was reloaded via `reload()` |
+| Event                    | Payload                                               | Emitted when                                                                               |
+| ------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `downloadBundleProgress` | `{ bundleId, downloadedBytes, progress, totalBytes }` | A bundle download makes progress                                                           |
+| `nextBundleSet`          | `{ bundleId }`                                        | A bundle is set as the next bundle                                                         |
+| `reloaded`               | –                                                     | The app was reloaded via `reload()`                                                        |
+| `rolledBack`             | `{ currentBundleId, previousBundleId }`               | The app was rolled back to a previous bundle after a boot did not signal readiness in time |
 
 Events are available in the main process (`liveUpdate.addListener(...)`) and forwarded to attached renderers (`LiveUpdate.addListener(...)`).
 
