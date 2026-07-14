@@ -377,17 +377,33 @@ class LiveUpdateImpl implements LiveUpdate {
       if (window.isDestroyed()) {
         continue;
       }
-      if (this.scheme !== null) {
-        await window.webContents.loadURL(this.getServeUrl());
-      } else {
-        const bundlePath = await this.getCurrentBundlePath();
-        if (!bundlePath) {
-          throw new LiveUpdateError(
-            ErrorCode.Unknown,
-            'Cannot reload: no bundle is active and no defaultBundlePath is configured.',
-          );
+      // Cancel any in-flight navigation (e.g. a still-pending initial
+      // load) so it cannot commit afterwards and abort this reload.
+      window.webContents.stop();
+      try {
+        if (this.scheme !== null) {
+          await window.webContents.loadURL(this.getServeUrl());
+        } else {
+          const bundlePath = await this.getCurrentBundlePath();
+          if (!bundlePath) {
+            throw new LiveUpdateError(
+              ErrorCode.Unknown,
+              'Cannot reload: no bundle is active and no defaultBundlePath is configured.',
+            );
+          }
+          await window.webContents.loadFile(join(bundlePath, 'index.html'));
         }
-        await window.webContents.loadFile(join(bundlePath, 'index.html'));
+      } catch (error) {
+        // ERR_ABORTED means another navigation superseded this reload
+        // (e.g. the host app navigated the window concurrently). The
+        // navigation that won decides what the window shows; failing
+        // the whole reload for it would be wrong.
+        if ((error as { code?: string }).code !== 'ERR_ABORTED') {
+          throw error;
+        }
+        this.logger.warn(
+          'Reload was superseded by another navigation in the same window.',
+        );
       }
     }
   }

@@ -45,7 +45,10 @@ async function launchExample(
     env: {
       ...(process.env as Record<string, string>),
       EXAMPLE_PUBLIC_KEY: (await getExamplePublicKey()) as string,
-      EXAMPLE_READY_TIMEOUT: '10000',
+      // Generous watchdog ceiling: a spurious rollback (and bundle
+      // block) during a slow CI boot would break these specs. No spec
+      // relies on the watchdog timer firing.
+      EXAMPLE_READY_TIMEOUT: '60000',
       EXAMPLE_SERVER_DOMAIN: mockServer.serverDomain,
       EXAMPLE_SERVING_MODE: options.servingMode ?? 'serve',
       EXAMPLE_USER_DATA: userDataDirectory,

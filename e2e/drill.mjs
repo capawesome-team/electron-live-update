@@ -150,7 +150,13 @@ function launchApp(binaryPath, userDataDirectory, serverDomain, publicKey) {
       ...process.env,
       EXAMPLE_AUTO_UPDATE: 'background',
       EXAMPLE_PUBLIC_KEY: publicKey,
-      EXAMPLE_READY_TIMEOUT: '10000',
+      // Generous watchdog ceiling: a cold Electron boot on a slow CI
+      // runner can take longer than 10 s to call ready(). If the
+      // watchdog fires during a legitimate boot it rolls back AND
+      // blocks the bundle (autoBlockRolledBackBundles), after which
+      // the drill's expected states are unreachable. The drill tests
+      // rollback via kills, never by waiting for this timer.
+      EXAMPLE_READY_TIMEOUT: '60000',
       EXAMPLE_SERVER_DOMAIN: serverDomain,
       EXAMPLE_USER_DATA: userDataDirectory,
     },
