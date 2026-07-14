@@ -75,7 +75,7 @@ export interface LiveUpdateConfig {
    * The directory where the SDK stores its bundles and state.
    *
    * @since 0.1.0
-   * @default join(app.getPath('userData'), 'live-update')
+   * @default join(app.getPath('userData'), 'capawesome-live-update')
    */
   dataDirectory?: string;
   /**
@@ -177,7 +177,7 @@ export interface ServeOptions {
    * updates.
    *
    * @since 0.1.0
-   * @default 'live-update'
+   * @default 'capawesome-live-update'
    */
   scheme?: string;
 }
@@ -217,7 +217,7 @@ export interface LiveUpdate extends LiveUpdateApi {
    * Only available after `serve()` has been called.
    *
    * @since 0.1.0
-   * @example 'live-update://bundle/'
+   * @example 'capawesome-live-update://bundle/'
    */
   getServeUrl(): string;
   /**

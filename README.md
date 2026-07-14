@@ -91,7 +91,7 @@ That's it. The renderer code is line-for-line the same vocabulary you would use 
 
 ### Custom scheme (recommended): `serve()`
 
-`serve()` registers a privileged custom scheme (default: `live-update`) and serves the files of the active bundle under the stable origin `live-update://bundle`. Because the origin never changes:
+`serve()` registers a privileged custom scheme (default: `capawesome-live-update`) and serves the files of the active bundle under the stable origin `capawesome-live-update://bundle`. Because the origin never changes:
 
 - `localStorage`, IndexedDB, and other origin-scoped storage **survive bundle switches**,
 - `fetch()` and service workers work as on a regular secure origin,
@@ -101,7 +101,7 @@ That's it. The renderer code is line-for-line the same vocabulary you would use 
 
 ```ts
 liveUpdate.serve(); // or liveUpdate.serve({ scheme: 'my-app' })
-await window.loadURL(liveUpdate.getServeUrl()); // 'live-update://bundle/'
+await window.loadURL(liveUpdate.getServeUrl()); // 'capawesome-live-update://bundle/'
 ```
 
 ### Simple mode: `getCurrentBundlePath()`
@@ -228,22 +228,22 @@ Creates the SDK. Call once, early in your main process (before `app.whenReady()`
 
 #### Configuration
 
-| Option                       | Type                     | Default                                        | Description                                                                                   |
-| ---------------------------- | ------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `appId`                      | `string`                 | –                                              | Capawesome Cloud app ID. Required for `sync()`/`fetchLatestBundle()`.                         |
-| `autoBlockRolledBackBundles` | `boolean`                | `false`                                        | Block bundles that caused a rollback. No effect if `readyTimeout` is `0`.                     |
-| `autoDeleteBundles`          | `boolean`                | `false`                                        | Delete unused bundles after `ready()`.                                                        |
-| `autoUpdateStrategy`         | `'none' \| 'background'` | `'none'`                                       | `background`: sync automatically at start, on focus and on resume (at most every 15 minutes). |
-| `dataDirectory`              | `string`                 | `join(app.getPath('userData'), 'live-update')` | Where bundles and state are stored.                                                           |
-| `defaultChannel`             | `string`                 | –                                              | Default update channel.                                                                       |
-| `defaultBundlePath`          | `string`                 | –                                              | Directory of the packaged web assets. Required for `serve()`.                                 |
-| `httpTimeout`                | `number`                 | `60000`                                        | HTTP timeout in milliseconds.                                                                 |
-| `logger`                     | `LiveUpdateLogger`       | `console`                                      | Custom logger.                                                                                |
-| `publicKey`                  | `string`                 | –                                              | PEM-encoded RSA public key for signature verification.                                        |
-| `readyTimeout`               | `number`                 | `0`                                            | Rollback protection timeout in milliseconds. `0` disables it. Recommended: `10000`.           |
-| `serverDomain`               | `string`                 | `'api.cloud.capawesome.io'`                    | API domain, without scheme or path. Localhost domains use plain HTTP for development.         |
-| `versionCode`                | `string`                 | `app.getVersion()`                             | Version code reported to the update server.                                                   |
-| `versionName`                | `string`                 | `app.getVersion()`                             | Version name reported to the update server.                                                   |
+| Option                       | Type                     | Default                                                   | Description                                                                                   |
+| ---------------------------- | ------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `appId`                      | `string`                 | –                                                         | Capawesome Cloud app ID. Required for `sync()`/`fetchLatestBundle()`.                         |
+| `autoBlockRolledBackBundles` | `boolean`                | `false`                                                   | Block bundles that caused a rollback. No effect if `readyTimeout` is `0`.                     |
+| `autoDeleteBundles`          | `boolean`                | `false`                                                   | Delete unused bundles after `ready()`.                                                        |
+| `autoUpdateStrategy`         | `'none' \| 'background'` | `'none'`                                                  | `background`: sync automatically at start, on focus and on resume (at most every 15 minutes). |
+| `dataDirectory`              | `string`                 | `join(app.getPath('userData'), 'capawesome-live-update')` | Where bundles and state are stored.                                                           |
+| `defaultChannel`             | `string`                 | –                                                         | Default update channel.                                                                       |
+| `defaultBundlePath`          | `string`                 | –                                                         | Directory of the packaged web assets. Required for `serve()`.                                 |
+| `httpTimeout`                | `number`                 | `60000`                                                   | HTTP timeout in milliseconds.                                                                 |
+| `logger`                     | `LiveUpdateLogger`       | `console`                                                 | Custom logger.                                                                                |
+| `publicKey`                  | `string`                 | –                                                         | PEM-encoded RSA public key for signature verification.                                        |
+| `readyTimeout`               | `number`                 | `0`                                                       | Rollback protection timeout in milliseconds. `0` disables it. Recommended: `10000`.           |
+| `serverDomain`               | `string`                 | `'api.cloud.capawesome.io'`                               | API domain, without scheme or path. Localhost domains use plain HTTP for development.         |
+| `versionCode`                | `string`                 | `app.getVersion()`                                        | Version code reported to the update server.                                                   |
+| `versionName`                | `string`                 | `app.getVersion()`                                        | Version name reported to the update server.                                                   |
 
 #### Methods
 

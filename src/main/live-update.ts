@@ -54,7 +54,7 @@ import {
 import type { LiveUpdate, LiveUpdateConfig, ServeOptions } from './definitions';
 import { resolveServedFile } from './serving';
 
-const DEFAULT_SCHEME = 'live-update';
+const DEFAULT_SCHEME = 'capawesome-live-update';
 const SERVE_HOST = 'bundle';
 const AUTO_UPDATE_MIN_INTERVAL = 15 * 60 * 1000;
 const ELECTRON_PLATFORM = '2';
@@ -87,7 +87,8 @@ class LiveUpdateImpl implements LiveUpdate {
       autoBlockRolledBackBundles: config.autoBlockRolledBackBundles,
       autoDeleteBundles: config.autoDeleteBundles,
       dataDirectory:
-        config.dataDirectory ?? join(app.getPath('userData'), 'live-update'),
+        config.dataDirectory ??
+        join(app.getPath('userData'), 'capawesome-live-update'),
       defaultBundlePath: config.defaultBundlePath,
       defaultChannel: config.defaultChannel,
       httpTimeout: config.httpTimeout,
