@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -46,14 +47,14 @@ describe('manifest', () => {
 
   describe('resolveManifestFilePath', () => {
     it('resolves a nested path inside the target directory', () => {
-      const root = join('/tmp', 'bundle');
+      const root = join(tmpdir(), 'bundle');
       expect(resolveManifestFilePath(root, 'assets/app.js')).toBe(
         join(root, 'assets', 'app.js'),
       );
     });
 
     it('rejects path traversal', () => {
-      const root = join('/tmp', 'bundle');
+      const root = join(tmpdir(), 'bundle');
       for (const href of [
         '../escape.js',
         'assets/../../escape.js',
@@ -69,7 +70,7 @@ describe('manifest', () => {
     });
 
     it('normalizes backslashes and keeps the path inside the root', () => {
-      const root = join('/tmp', 'bundle');
+      const root = join(tmpdir(), 'bundle');
       const resolved = resolveManifestFilePath(root, 'assets\\app.js');
       expect(resolved.startsWith(root + sep)).toBe(true);
     });

@@ -46,13 +46,14 @@ export interface DownloadFileOptions {
 }
 
 /**
- * Append an `href` query parameter to a (pre-signed) bundle URL,
- * preserving any existing query parameters. Used to request individual
- * files of a `manifest` (delta) bundle.
+ * Set the `href` query parameter on a (pre-signed) bundle URL,
+ * preserving any other query parameters. Used to request individual
+ * files of a `manifest` (delta) bundle. `set` (rather than `append`)
+ * guarantees exactly one `href` even if the base URL already has one.
  */
 export function withHrefQueryParameter(baseUrl: string, href: string): string {
   const url = assertSecureUrl(baseUrl);
-  url.searchParams.append('href', href);
+  url.searchParams.set('href', href);
   return url.toString();
 }
 

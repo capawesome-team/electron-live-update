@@ -973,6 +973,117 @@ describe('LiveUpdateEngine', () => {
       expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
     });
 
+    it('falls back to the manifest checksum when the X-Checksum header is absent', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      const content = '<html>no-header</html>';
+      const manifest = [
+        {
+          checksum: sha256Hex(content),
+          href: 'index.html',
+          sizeInBytes: Buffer.byteLength(content),
+        },
+      ];
+      server.route('/manifest/no-header', request => {
+        const href = hrefOf(request);
+        if (href === MANIFEST_FILE_NAME) {
+          return { body: JSON.stringify(manifest) };
+        }
+        // Serve the file WITHOUT an X-Checksum header.
+        return { body: content };
+      });
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'no-header',
+        url: manifestUrl('no-header'),
+      });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([
+        'no-header',
+      ]);
+      expect(await readBundleFile('no-header', 'index.html')).toBe(content);
+    });
+
+    it('rejects a delta when the manifest checksum does not match the file', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      const content = '<html>corrupt</html>';
+      const manifest = [
+        {
+          // Manifest checksum of different bytes than what is served.
+          checksum: sha256Hex('<html>other</html>'),
+          href: 'index.html',
+          sizeInBytes: Buffer.byteLength(content),
+        },
+      ];
+      server.route('/manifest/corrupt', request => {
+        const href = hrefOf(request);
+        if (href === MANIFEST_FILE_NAME) {
+          return { body: JSON.stringify(manifest) };
+        }
+        // Serve the file WITHOUT an X-Checksum header.
+        return { body: content };
+      });
+      await expect(
+        engine.downloadBundle({
+          artifactType: 'manifest',
+          bundleId: 'corrupt',
+          url: manifestUrl('corrupt'),
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.ChecksumMismatch });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
+    });
+
+    it('rejects a delta whose X-Checksum header contradicts the manifest', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      const content = '<html>contradiction</html>';
+      const manifest = [
+        {
+          checksum: sha256Hex(content),
+          href: 'index.html',
+          sizeInBytes: Buffer.byteLength(content),
+        },
+      ];
+      server.route('/manifest/contradiction', request => {
+        const href = hrefOf(request);
+        if (href === MANIFEST_FILE_NAME) {
+          return { body: JSON.stringify(manifest) };
+        }
+        // Correct bytes, but a header checksum that disagrees with the
+        // trusted manifest checksum.
+        return { body: content, headers: { 'X-Checksum': 'a'.repeat(64) } };
+      });
+      await expect(
+        engine.downloadBundle({
+          artifactType: 'manifest',
+          bundleId: 'contradiction',
+          url: manifestUrl('contradiction'),
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.ChecksumMismatch });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
+    });
+
+    it('accepts a delta whose X-Checksum header matches the manifest', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      // serveManifestBundle sends an X-Checksum header equal to the
+      // manifest checksum for every file.
+      serveManifestBundle('agree', [
+        { href: 'index.html', content: '<html>agree</html>' },
+      ]);
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'agree',
+        url: manifestUrl('agree'),
+      });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([
+        'agree',
+      ]);
+      expect(await readBundleFile('agree', 'index.html')).toBe(
+        '<html>agree</html>',
+      );
+    });
+
     it('rejects a delta without an index.html file', async () => {
       const engine = createEngine();
       await engine.initialize();

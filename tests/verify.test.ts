@@ -69,6 +69,59 @@ describe('verification', () => {
     await expect(verifyDownloadedFile({ filePath })).resolves.toBeUndefined();
   });
 
+  it('falls back to the manifest checksum when no header checksum is present', async () => {
+    const manifestChecksum = createHash('sha256')
+      .update(fileContent)
+      .digest('hex');
+    await expect(
+      verifyDownloadedFile({ filePath, manifestChecksum }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects a manifest checksum mismatch when no header checksum is present', async () => {
+    await expect(
+      verifyDownloadedFile({ filePath, manifestChecksum: 'a'.repeat(64) }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.ChecksumMismatch,
+      message: 'Checksum mismatch.',
+    });
+  });
+
+  it('accepts when the header checksum matches the manifest checksum', async () => {
+    const checksum = createHash('sha256').update(fileContent).digest('hex');
+    await expect(
+      verifyDownloadedFile({ filePath, checksum, manifestChecksum: checksum }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects when the header checksum contradicts the manifest checksum', async () => {
+    const checksum = createHash('sha256').update(fileContent).digest('hex');
+    await expect(
+      verifyDownloadedFile({
+        filePath,
+        checksum,
+        manifestChecksum: 'a'.repeat(64),
+      }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.ChecksumMismatch,
+      message: 'Checksum mismatch.',
+    });
+  });
+
+  it('ignores the manifest checksum when a public key is configured', async () => {
+    const { privateKeyPem, publicKeyPem } = generateRsaKeyPair();
+    const signature = signBytes(fileContent, privateKeyPem);
+    // Wrong manifest checksum, valid signature: the signature path wins.
+    await expect(
+      verifyDownloadedFile({
+        filePath,
+        publicKey: publicKeyPem,
+        signature,
+        manifestChecksum: 'a'.repeat(64),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('verifies a valid signature', async () => {
     const { privateKeyPem, publicKeyPem } = generateRsaKeyPair();
     const signature = signBytes(fileContent, privateKeyPem);

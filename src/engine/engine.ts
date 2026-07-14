@@ -1246,6 +1246,7 @@ export class LiveUpdateEngine {
         await verifyDownloadedFile({
           checksum: result.checksum,
           filePath: destinationPath,
+          manifestChecksum: item.checksum,
           publicKey: this.publicKey,
           signature: result.signature,
         });
