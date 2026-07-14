@@ -855,6 +855,76 @@ describe('LiveUpdateEngine', () => {
       expect(requestedHrefs()).not.toContain('assets/app.js');
     });
 
+    it('downloads a reused file whose on-disk copy no longer matches its checksum', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      const baseZip = await buildZip([
+        { path: 'index.html', content: '<html>base</html>' },
+        { path: 'assets/app.js', content: 'shared-code' },
+      ]);
+      server.route('/download/base.zip', { body: baseZip });
+      await engine.downloadBundle({
+        bundleId: 'base',
+        url: `${server.origin}/download/base.zip`,
+      });
+      await engine.setNextBundle({ bundleId: 'base' });
+      await engine.applyNextBundle();
+      // Tamper the installed file on disk AFTER install. The diff still
+      // uses the install-time checksum, so the delta would try to copy
+      // it; the copy re-verification must catch the mismatch and download
+      // the file from the server instead.
+      await writeFile(
+        join(dataDirectory, 'bundles', 'base', 'assets', 'app.js'),
+        'tampered-on-disk',
+      );
+      serveManifestBundle('next', [
+        { href: 'index.html', content: '<html>next</html>' },
+        { href: 'assets/app.js', content: 'shared-code' },
+      ]);
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'next',
+        url: manifestUrl('next'),
+      });
+      // The assembled bundle contains the server version, not the
+      // tampered on-disk copy.
+      expect(await readBundleFile('next', 'assets/app.js')).toBe('shared-code');
+      expect(requestedHrefs()).toContain('assets/app.js');
+    });
+
+    it('never regresses aggregate progress when sizeInBytes is missing or zero', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      const content = '<html>zero-size</html>';
+      const manifest = [
+        { checksum: sha256Hex(content), href: 'index.html', sizeInBytes: 0 },
+      ];
+      server.route('/manifest/zero', request => {
+        const href = hrefOf(request);
+        if (href === MANIFEST_FILE_NAME) {
+          return { body: JSON.stringify(manifest) };
+        }
+        return { body: content, headers: { 'X-Checksum': sha256Hex(content) } };
+      });
+      const progressEvents: DownloadBundleProgressEvent[] = [];
+      engine.on('downloadBundleProgress', event => progressEvents.push(event));
+      await engine.downloadBundle({
+        artifactType: 'manifest',
+        bundleId: 'zero',
+        url: manifestUrl('zero'),
+      });
+      // The aggregate downloaded byte count must be monotonic even though
+      // the completed file reports a sizeInBytes of 0.
+      let previous = 0;
+      for (const event of progressEvents) {
+        expect(event.downloadedBytes).toBeGreaterThanOrEqual(previous);
+        previous = event.downloadedBytes;
+      }
+      const lastEvent = progressEvents[progressEvents.length - 1];
+      expect(lastEvent?.progress).toBe(1);
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual(['zero']);
+    });
+
     it('emits aggregated download progress across files', async () => {
       const engine = createEngine();
       await engine.initialize();

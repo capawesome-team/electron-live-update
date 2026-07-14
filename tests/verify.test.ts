@@ -69,6 +69,27 @@ describe('verification', () => {
     await expect(verifyDownloadedFile({ filePath })).resolves.toBeUndefined();
   });
 
+  it('rejects a present-but-empty checksum header', async () => {
+    await expect(
+      verifyDownloadedFile({ filePath, checksum: '' }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.ChecksumMismatch,
+      message: 'Checksum mismatch.',
+    });
+  });
+
+  it('rejects a present-but-empty checksum header even with a manifest checksum', async () => {
+    const manifestChecksum = createHash('sha256')
+      .update(fileContent)
+      .digest('hex');
+    await expect(
+      verifyDownloadedFile({ filePath, checksum: '', manifestChecksum }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.ChecksumMismatch,
+      message: 'Checksum mismatch.',
+    });
+  });
+
   it('falls back to the manifest checksum when no header checksum is present', async () => {
     const manifestChecksum = createHash('sha256')
       .update(fileContent)
@@ -161,6 +182,20 @@ describe('verification', () => {
     ).rejects.toMatchObject({
       code: ErrorCode.SignatureMissing,
       message: 'Bundle does not contain a signature.',
+    });
+  });
+
+  it('rejects a present-but-empty signature (not treated as missing)', async () => {
+    const { publicKeyPem } = generateRsaKeyPair();
+    await expect(
+      verifyDownloadedFile({
+        filePath,
+        publicKey: publicKeyPem,
+        signature: '',
+      }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.SignatureVerificationFailed,
+      message: 'Signature verification failed.',
     });
   });
 

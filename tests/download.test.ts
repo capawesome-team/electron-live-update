@@ -101,6 +101,22 @@ describe('downloadFile', () => {
     expect(result.signature).toBe('ZmFrZQ==');
   });
 
+  it('preserves present-but-empty verification headers as empty strings', async () => {
+    server.route('/bundle.zip', {
+      body: 'data',
+      headers: { 'X-Checksum': '', 'X-Signature': '' },
+    });
+    const result = await downloadFile({
+      destinationPath: join(workingDirectory, 'bundle.zip'),
+      httpTimeout: 5000,
+      url: `${server.origin}/bundle.zip`,
+    });
+    // An empty header must not be collapsed to undefined: a present-but-
+    // empty value flows into verification and rejects there.
+    expect(result.checksum).toBe('');
+    expect(result.signature).toBe('');
+  });
+
   it('fails with DOWNLOAD_FAILED on a non-2xx response', async () => {
     server.route('/bundle.zip', { body: 'gone', status: 404 });
     await expect(

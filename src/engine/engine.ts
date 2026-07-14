@@ -43,6 +43,7 @@ import {
 import { StateFile } from './state-file';
 import {
   calculateContentChecksums,
+  calculateFileChecksum,
   parsePublicKey,
   verifyContentChecksums,
   verifyDownloadedFile,
@@ -1151,8 +1152,16 @@ export class LiveUpdateEngine {
 
   /**
    * Copy the given files from the current bundle into the assembly
-   * directory. Returns the items that could not be copied (missing on
-   * disk), so they can be downloaded instead.
+   * directory. Returns the items that could not be reused (missing on
+   * disk, copy failure, or content that no longer matches the manifest
+   * checksum), so they can be downloaded instead.
+   *
+   * The copied file is re-hashed and compared against the manifest
+   * checksum: the diff key comes from the install-time metadata, so a
+   * file tampered on disk after install would otherwise be copied and
+   * then re-blessed by the fresh install-time checksum pass, defeating
+   * the activation-time integrity guarantee. On any mismatch the file
+   * is downloaded from the server instead.
    */
   private async copyManifestFiles(
     items: ManifestItem[],
@@ -1177,6 +1186,10 @@ export class LiveUpdateEngine {
           join(sourceDirectory, sourceRelativePath),
           destinationPath,
         );
+        const checksum = await calculateFileChecksum(destinationPath);
+        if (checksum !== item.checksum.toLowerCase()) {
+          failures.push(item);
+        }
       } catch {
         failures.push(item);
       }
@@ -1251,8 +1264,13 @@ export class LiveUpdateEngine {
           signature: result.signature,
         });
         // Account for the full file size even if no Content-Length was
-        // sent, so the aggregate progress reaches the total.
-        downloadedPerFile[index] = item.sizeInBytes;
+        // sent, so the aggregate progress reaches the total. Never drop
+        // below the bytes already streamed (e.g. when `sizeInBytes` is
+        // missing/0) so the aggregate progress can only ever increase.
+        downloadedPerFile[index] = Math.max(
+          downloadedPerFile[index] ?? 0,
+          item.sizeInBytes,
+        );
         emitProgress();
       }
     };

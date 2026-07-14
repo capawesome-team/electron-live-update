@@ -101,20 +101,23 @@ export interface VerifyDownloadedFileOptions {
  *
  * Verification precedence (mirrors the Capacitor plugin):
  * 1. If a `publicKey` is configured, a signature is REQUIRED and the
- *    checksum is ignored.
+ *    checksum is ignored. A present-but-empty signature is NOT treated
+ *    as missing: it flows into the verification and fails there. Only
+ *    an absent (`undefined`) signature is reported as missing.
  * 2. Otherwise, if a `checksum` header and a `manifestChecksum` are
  *    both present and disagree, verification fails: a header
  *    contradicting the trusted manifest is suspicious.
  * 3. Otherwise, if either a `checksum` header or a `manifestChecksum`
- *    is available, it is verified (the header taking precedence).
- * 4. Otherwise, the file is accepted without verification.
+ *    is available, it is verified (the header taking precedence). A
+ *    present-but-empty value is a value: it is compared and rejects.
+ * 4. Otherwise (both absent), the file is accepted without verification.
  */
 export async function verifyDownloadedFile(
   options: VerifyDownloadedFileOptions,
 ): Promise<void> {
   if (options.publicKey) {
     const publicKey = parsePublicKey(options.publicKey);
-    if (!options.signature) {
+    if (options.signature === undefined) {
       throw new LiveUpdateError(
         ErrorCode.SignatureMissing,
         'Bundle does not contain a signature.',
@@ -133,7 +136,7 @@ export async function verifyDownloadedFile(
     throw new LiveUpdateError(ErrorCode.ChecksumMismatch, 'Checksum mismatch.');
   }
   const expectedChecksum = headerChecksum ?? manifestChecksum;
-  if (expectedChecksum) {
+  if (expectedChecksum !== undefined) {
     const actualChecksum = await calculateFileChecksum(options.filePath);
     if (actualChecksum !== expectedChecksum) {
       throw new LiveUpdateError(
