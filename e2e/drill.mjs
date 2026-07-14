@@ -139,7 +139,13 @@ async function packageApp() {
 }
 
 function launchApp(binaryPath, userDataDirectory, serverDomain, publicKey) {
-  const child = spawn(binaryPath, [], {
+  // `--no-sandbox` is required on Linux CI: the Electron distribution is
+  // copied into place by the drill, so its `chrome-sandbox` helper is not
+  // owned by root with the setuid bit, and the runner (Ubuntu) also
+  // restricts unprivileged user namespaces. Without this flag Electron
+  // aborts on launch and never writes any engine state. Harmless on macOS
+  // and Windows, which do not use the SUID sandbox.
+  const child = spawn(binaryPath, ['--no-sandbox'], {
     env: {
       ...process.env,
       EXAMPLE_AUTO_UPDATE: 'background',
@@ -148,7 +154,10 @@ function launchApp(binaryPath, userDataDirectory, serverDomain, publicKey) {
       EXAMPLE_SERVER_DOMAIN: serverDomain,
       EXAMPLE_USER_DATA: userDataDirectory,
     },
-    stdio: 'ignore',
+    // Keep stderr attached so a launch failure (e.g. the Chromium
+    // sandbox aborting on CI) surfaces in the logs instead of leaving
+    // waitForState to time out with no explanation.
+    stdio: ['ignore', 'ignore', 'inherit'],
   });
   return child;
 }
