@@ -108,20 +108,6 @@ test('rejects a tampered bundle (signature verification)', async () => {
   await app.close();
 });
 
-test('syncs a manifest (delta) bundle over the built-in bundle', async () => {
-  await mockServer.setLatest('4.0.0-manifest');
-  const { app, page } = await launchExample();
-  await page.getByTestId('sync').click();
-  await expect(page.getByTestId('next-bundle')).toHaveText('4.0.0-manifest');
-  await page.getByTestId('reload').click();
-  await expect(page.getByTestId('current-bundle')).toHaveText('4.0.0-manifest');
-  await expect(page.getByTestId('marker')).toHaveText('2.0.0');
-  await expect(page.getByTestId('ready-state')).toContainText(
-    'rollback: false',
-  );
-  await app.close();
-});
-
 test('simple mode: syncs and reloads via getCurrentBundlePath()', async () => {
   await mockServer.setLatest('2.0.0');
   const { app, page } = await launchExample({ servingMode: 'simple' });

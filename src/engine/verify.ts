@@ -78,14 +78,6 @@ export interface VerifyDownloadedFileOptions {
   checksum?: string;
   filePath: string;
   /**
-   * SHA-256 checksum in hex format from the trusted bundle manifest
-   * (a `manifest`/delta bundle item). Used to verify individual files
-   * of a delta bundle when no `publicKey` is configured: it is used as
-   * a fallback when no `checksum` header is present and, when both are
-   * present, a `checksum` header contradicting it fails verification.
-   */
-  manifestChecksum?: string;
-  /**
    * PEM-encoded RSA public key from the SDK configuration.
    */
   publicKey?: string;
@@ -104,13 +96,9 @@ export interface VerifyDownloadedFileOptions {
  *    checksum is ignored. A present-but-empty signature is NOT treated
  *    as missing: it flows into the verification and fails there. Only
  *    an absent (`undefined`) signature is reported as missing.
- * 2. Otherwise, if a `checksum` header and a `manifestChecksum` are
- *    both present and disagree, verification fails: a header
- *    contradicting the trusted manifest is suspicious.
- * 3. Otherwise, if either a `checksum` header or a `manifestChecksum`
- *    is available, it is verified (the header taking precedence). A
+ * 2. Otherwise, if a `checksum` is available, it is verified. A
  *    present-but-empty value is a value: it is compared and rejects.
- * 4. Otherwise (both absent), the file is accepted without verification.
+ * 3. Otherwise, the file is accepted without verification.
  */
 export async function verifyDownloadedFile(
   options: VerifyDownloadedFileOptions,
@@ -126,16 +114,7 @@ export async function verifyDownloadedFile(
     await verifyFileSignature(options.filePath, options.signature, publicKey);
     return;
   }
-  const headerChecksum = options.checksum?.toLowerCase();
-  const manifestChecksum = options.manifestChecksum?.toLowerCase();
-  if (
-    headerChecksum !== undefined &&
-    manifestChecksum !== undefined &&
-    headerChecksum !== manifestChecksum
-  ) {
-    throw new LiveUpdateError(ErrorCode.ChecksumMismatch, 'Checksum mismatch.');
-  }
-  const expectedChecksum = headerChecksum ?? manifestChecksum;
+  const expectedChecksum = options.checksum?.toLowerCase();
   if (expectedChecksum !== undefined) {
     const actualChecksum = await calculateFileChecksum(options.filePath);
     if (actualChecksum !== expectedChecksum) {

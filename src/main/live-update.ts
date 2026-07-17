@@ -89,7 +89,6 @@ class LiveUpdateImpl implements LiveUpdate {
       dataDirectory:
         config.dataDirectory ??
         join(app.getPath('userData'), 'capawesome-live-update'),
-      defaultBundlePath: config.defaultBundlePath,
       defaultChannel: config.defaultChannel,
       httpTimeout: config.httpTimeout,
       logger: this.logger,

@@ -45,8 +45,8 @@ export interface DownloadBundleOptions {
   /**
    * The artifact type of the bundle.
    *
-   * Use `manifest` for delta updates: only files that changed compared
-   * to the current bundle are downloaded, the rest are copied locally.
+   * **Attention**: The `manifest` artifact type is not yet supported
+   * by this SDK.
    *
    * @since 0.1.0
    * @default 'zip'

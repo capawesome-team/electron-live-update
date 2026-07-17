@@ -11,7 +11,6 @@ This SDK speaks the same protocol and the same vocabulary as the [`@capawesome/c
 - 🔒 **Signature verification**: RSA signature verification of every downloaded bundle (`publicKey`), plus checksum re-verification of the installed bundle at activation time — tampering after download is detected too.
 - 🌐 **Stable origin serving**: A privileged custom scheme serves the active bundle under a constant origin, so `localStorage`, IndexedDB and service workers survive bundle switches. A simple path-based mode is available as an alternative.
 - 🚦 **Channels**: Deliver different bundles to different user groups (production, beta, staged rollouts), and discover them at runtime with `fetchChannels()`.
-- 🧩 **Delta updates**: The `manifest` artifact type downloads only the files that changed and reuses the rest from the current bundle — smaller, faster updates.
 - 📂 **Multiple bundles**: Download, manage and switch between bundles programmatically.
 - 🔁 **Background updates**: Optional automatic sync at app start, on focus and on resume.
 - 🔐 **Secure by default**: HTTPS-only downloads (localhost exempt for development), zip-slip protection, atomic bundle installation.
@@ -218,7 +217,7 @@ The API mirrors [`@capawesome/capacitor-live-update`](https://capawesome.io/plug
 | Serving                       | Capacitor WebView                       | `serve()` custom scheme or `getCurrentBundlePath()`                       |
 | `setConfig()`                 | Available                               | Not available                                                             |
 | `fetchChannels()`             | Available                               | **Available**                                                             |
-| `manifest` artifact type      | Available (delta updates)               | **Available** (delta updates)                                             |
+| `manifest` artifact type      | Available (delta updates)               | Not yet available (`zip` only)                                            |
 
 ## API
 
