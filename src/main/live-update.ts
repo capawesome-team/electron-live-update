@@ -15,6 +15,8 @@ import type {
   DeleteBundleOptions,
   DownloadBundleOptions,
   DownloadBundleProgressListener,
+  FetchChannelsOptions,
+  FetchChannelsResult,
   FetchLatestBundleOptions,
   FetchLatestBundleResult,
   GetBlockedBundlesResult,
@@ -31,6 +33,7 @@ import type {
   NextBundleSetListener,
   ReadyResult,
   ReloadedListener,
+  RolledBackListener,
   SetChannelOptions,
   SetCustomIdOptions,
   SetNextBundleOptions,
@@ -51,7 +54,7 @@ import {
 import type { LiveUpdate, LiveUpdateConfig, ServeOptions } from './definitions';
 import { resolveServedFile } from './serving';
 
-const DEFAULT_SCHEME = 'live-update';
+const DEFAULT_SCHEME = 'capawesome-live-update';
 const SERVE_HOST = 'bundle';
 const AUTO_UPDATE_MIN_INTERVAL = 15 * 60 * 1000;
 const ELECTRON_PLATFORM = '2';
@@ -84,7 +87,8 @@ class LiveUpdateImpl implements LiveUpdate {
       autoBlockRolledBackBundles: config.autoBlockRolledBackBundles,
       autoDeleteBundles: config.autoDeleteBundles,
       dataDirectory:
-        config.dataDirectory ?? join(app.getPath('userData'), 'live-update'),
+        config.dataDirectory ??
+        join(app.getPath('userData'), 'capawesome-live-update'),
       defaultChannel: config.defaultChannel,
       httpTimeout: config.httpTimeout,
       logger: this.logger,
@@ -112,6 +116,7 @@ class LiveUpdateImpl implements LiveUpdate {
             : `bundle '${event.currentBundleId}'`
         }.`,
       );
+      this.emitEvent('rolledBack', event);
       void this.reloadAttachedWindows().catch(error =>
         this.logger.error(
           `Failed to reload after rollback: ${this.describeError(error)}`,
@@ -206,6 +211,13 @@ class LiveUpdateImpl implements LiveUpdate {
   public async sync(options?: SyncOptions): Promise<SyncResult> {
     await this.initialization;
     return this.engine.sync(options);
+  }
+
+  public async fetchChannels(
+    options?: FetchChannelsOptions,
+  ): Promise<FetchChannelsResult> {
+    await this.initialization;
+    return this.engine.fetchChannels(options);
   }
 
   public async fetchLatestBundle(
@@ -313,6 +325,10 @@ class LiveUpdateImpl implements LiveUpdate {
     listener: ReloadedListener,
   ): ListenerHandle;
   public addListener(
+    eventName: 'rolledBack',
+    listener: RolledBackListener,
+  ): ListenerHandle;
+  public addListener(
     eventName: IpcEvent,
     listener: (...args: never[]) => void,
   ): ListenerHandle {
@@ -360,17 +376,33 @@ class LiveUpdateImpl implements LiveUpdate {
       if (window.isDestroyed()) {
         continue;
       }
-      if (this.scheme !== null) {
-        await window.webContents.loadURL(this.getServeUrl());
-      } else {
-        const bundlePath = await this.getCurrentBundlePath();
-        if (!bundlePath) {
-          throw new LiveUpdateError(
-            ErrorCode.Unknown,
-            'Cannot reload: no bundle is active and no defaultBundlePath is configured.',
-          );
+      // Cancel any in-flight navigation (e.g. a still-pending initial
+      // load) so it cannot commit afterwards and abort this reload.
+      window.webContents.stop();
+      try {
+        if (this.scheme !== null) {
+          await window.webContents.loadURL(this.getServeUrl());
+        } else {
+          const bundlePath = await this.getCurrentBundlePath();
+          if (!bundlePath) {
+            throw new LiveUpdateError(
+              ErrorCode.Unknown,
+              'Cannot reload: no bundle is active and no defaultBundlePath is configured.',
+            );
+          }
+          await window.webContents.loadFile(join(bundlePath, 'index.html'));
         }
-        await window.webContents.loadFile(join(bundlePath, 'index.html'));
+      } catch (error) {
+        // ERR_ABORTED means another navigation superseded this reload
+        // (e.g. the host app navigated the window concurrently). The
+        // navigation that won decides what the window shows; failing
+        // the whole reload for it would be wrong.
+        if ((error as { code?: string }).code !== 'ERR_ABORTED') {
+          throw error;
+        }
+        this.logger.warn(
+          'Reload was superseded by another navigation in the same window.',
+        );
       }
     }
   }
@@ -461,6 +493,8 @@ class LiveUpdateImpl implements LiveUpdate {
         return this.deleteBundle(options as DeleteBundleOptions);
       case 'downloadBundle':
         return this.downloadBundle(options as DownloadBundleOptions);
+      case 'fetchChannels':
+        return this.fetchChannels(options as FetchChannelsOptions | undefined);
       case 'fetchLatestBundle':
         return this.fetchLatestBundle(
           options as FetchLatestBundleOptions | undefined,

@@ -701,6 +701,95 @@ describe('LiveUpdateEngine', () => {
     });
   });
 
+  describe('fetchChannels', () => {
+    it('returns the channels', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      server.route('/v1/apps/app-123/channels', {
+        body: JSON.stringify([
+          { id: 'c1', name: 'production' },
+          { id: 'c2', name: 'beta' },
+        ]),
+      });
+      const result = await engine.fetchChannels();
+      expect(result).toEqual({
+        channels: [
+          { id: 'c1', name: 'production' },
+          { id: 'c2', name: 'beta' },
+        ],
+      });
+    });
+
+    it('sends the default and overridden pagination parameters', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      server.route('/v1/apps/app-123/channels', { body: '[]' });
+      await engine.fetchChannels();
+      let params = server.requests[0]?.url.searchParams;
+      expect(params?.get('limit')).toBe('50');
+      expect(params?.get('offset')).toBe('0');
+      expect(params?.has('query')).toBe(false);
+      await engine.fetchChannels({ limit: 5, offset: 10, query: 'prod' });
+      params = server.requests[1]?.url.searchParams;
+      expect(params?.get('limit')).toBe('5');
+      expect(params?.get('offset')).toBe('10');
+      expect(params?.get('query')).toBe('prod');
+    });
+
+    it('throws CHANNEL_DISCOVERY_NOT_ENABLED on 401', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      server.route('/v1/apps/app-123/channels', {
+        body: 'unauthorized',
+        status: 401,
+      });
+      await expect(engine.fetchChannels()).rejects.toMatchObject({
+        code: ErrorCode.ChannelDiscoveryNotEnabled,
+        message:
+          'Unauthorized. Channel Discovery may not be enabled for this app.',
+      });
+    });
+
+    it('requires an appId', async () => {
+      const engine = createEngine({ appId: undefined });
+      await engine.initialize();
+      await expect(engine.fetchChannels()).rejects.toMatchObject({
+        code: ErrorCode.AppIdMissing,
+      });
+    });
+  });
+
+  describe('injectable runtime and pluginVersion', () => {
+    it('defaults pluginVersion to the SDK version', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      server.route('/v1/apps/app-123/bundles/latest', {
+        body: 'no',
+        status: 404,
+      });
+      await engine.sync();
+      expect(server.requests[0]?.url.searchParams.get('pluginVersion')).toBe(
+        '0.0.1',
+      );
+    });
+
+    it('sends the injected pluginVersion and runtime', async () => {
+      const engine = createEngine({
+        pluginVersion: '8.4.0',
+        runtime: 'capacitor',
+      });
+      await engine.initialize();
+      server.route('/v1/apps/app-123/bundles/latest', {
+        body: 'no',
+        status: 404,
+      });
+      await engine.sync();
+      const params = server.requests[0]?.url.searchParams;
+      expect(params?.get('pluginVersion')).toBe('8.4.0');
+      expect(params?.get('runtime')).toBe('capacitor');
+    });
+  });
+
   describe('guards', () => {
     it('throws when used before initialize()', async () => {
       const engine = createEngine();

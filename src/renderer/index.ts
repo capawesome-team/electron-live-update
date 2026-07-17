@@ -2,6 +2,8 @@ import type {
   DeleteBundleOptions,
   DownloadBundleOptions,
   DownloadBundleProgressListener,
+  FetchChannelsOptions,
+  FetchChannelsResult,
   FetchLatestBundleOptions,
   FetchLatestBundleResult,
   GetBlockedBundlesResult,
@@ -19,6 +21,7 @@ import type {
   NextBundleSetListener,
   ReadyResult,
   ReloadedListener,
+  RolledBackListener,
   SetChannelOptions,
   SetCustomIdOptions,
   SetNextBundleOptions,
@@ -74,6 +77,12 @@ class LiveUpdateClient implements LiveUpdateApi {
 
   public downloadBundle(options: DownloadBundleOptions): Promise<void> {
     return invoke('downloadBundle', options);
+  }
+
+  public fetchChannels(
+    options?: FetchChannelsOptions,
+  ): Promise<FetchChannelsResult> {
+    return invoke('fetchChannels', options);
   }
 
   public fetchLatestBundle(
@@ -161,6 +170,10 @@ class LiveUpdateClient implements LiveUpdateApi {
   public addListener(
     eventName: 'reloaded',
     listener: ReloadedListener,
+  ): ListenerHandle;
+  public addListener(
+    eventName: 'rolledBack',
+    listener: RolledBackListener,
   ): ListenerHandle;
   public addListener(
     eventName: IpcEvent,

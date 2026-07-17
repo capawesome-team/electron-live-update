@@ -1,4 +1,4 @@
-import { createSign, generateKeyPairSync } from 'node:crypto';
+import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import {
@@ -260,4 +260,8 @@ export class MockServer {
 
 export async function readTextFile(filePath: string): Promise<string> {
   return readFile(filePath, 'utf8');
+}
+
+export function sha256Hex(content: string | Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
 }

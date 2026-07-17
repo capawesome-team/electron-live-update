@@ -19,8 +19,8 @@ describe('CloudApiClient', () => {
     deviceId: 'device-1',
     osVersion: '25.5.0',
     platform: '2',
+    pluginVersion: '0.0.1',
     runtime: 'electron' as string | null,
-    sdkVersion: '0.0.1',
   };
 
   beforeEach(async () => {
@@ -173,6 +173,81 @@ describe('CloudApiClient', () => {
     server.route('/v1/apps/app-123/bundles/latest', { body: 'not json' });
     await expect(client.getLatestBundle(request)).rejects.toMatchObject({
       code: ErrorCode.Unknown,
+    });
+  });
+
+  describe('getChannels', () => {
+    const channelsRequest = {
+      appId: 'app-123',
+      deviceId: 'device-1',
+      limit: 50,
+      offset: 0,
+      query: null as string | null,
+    };
+
+    it('requests the channels with the exact protocol query parameters', async () => {
+      server.route('/v1/apps/app-123/channels', {
+        body: JSON.stringify([{ id: 'c1', name: 'production' }]),
+      });
+      const channels = await client.getChannels({
+        ...channelsRequest,
+        limit: 10,
+        offset: 5,
+        query: 'prod',
+      });
+      expect(channels).toEqual([{ id: 'c1', name: 'production' }]);
+      const recorded = server.requests[0];
+      expect(recorded?.url.pathname).toBe('/v1/apps/app-123/channels');
+      const params = recorded?.url.searchParams;
+      expect(params?.get('limit')).toBe('10');
+      expect(params?.get('offset')).toBe('5');
+      expect(params?.get('query')).toBe('prod');
+      expect(recorded?.headers['x-capawesome-device-id']).toBe('device-1');
+    });
+
+    it('omits the query parameter when not provided', async () => {
+      server.route('/v1/apps/app-123/channels', { body: '[]' });
+      await client.getChannels(channelsRequest);
+      const params = server.requests[0]?.url.searchParams;
+      expect(params?.has('query')).toBe(false);
+      expect(params?.get('limit')).toBe('50');
+      expect(params?.get('offset')).toBe('0');
+    });
+
+    it('throws CHANNEL_DISCOVERY_NOT_ENABLED on 401', async () => {
+      server.route('/v1/apps/app-123/channels', {
+        body: 'unauthorized',
+        status: 401,
+      });
+      await expect(client.getChannels(channelsRequest)).rejects.toMatchObject({
+        code: ErrorCode.ChannelDiscoveryNotEnabled,
+        message:
+          'Unauthorized. Channel Discovery may not be enabled for this app.',
+      });
+    });
+
+    it('throws on other non-2xx responses', async () => {
+      server.route('/v1/apps/app-123/channels', {
+        body: 'boom',
+        status: 500,
+      });
+      await expect(client.getChannels(channelsRequest)).rejects.toMatchObject({
+        code: ErrorCode.Unknown,
+      });
+    });
+
+    it('ignores malformed channel entries', async () => {
+      server.route('/v1/apps/app-123/channels', {
+        body: JSON.stringify([
+          { id: 'c1', name: 'production' },
+          { id: 'c2' },
+          'garbage',
+          { name: 'no-id' },
+        ]),
+      });
+      expect(await client.getChannels(channelsRequest)).toEqual([
+        { id: 'c1', name: 'production' },
+      ]);
     });
   });
 });

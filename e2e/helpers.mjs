@@ -93,7 +93,7 @@ export async function readState(userDataDirectory) {
   try {
     return JSON.parse(
       await readFile(
-        join(userDataDirectory, 'live-update', 'state.json'),
+        join(userDataDirectory, 'capawesome-live-update', 'state.json'),
         'utf8',
       ),
     );

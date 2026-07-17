@@ -1,5 +1,7 @@
-import { open, mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { open, mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+
+import { renameWithRetry, retryOnFileLock } from './fs-retry';
 
 /**
  * Metadata stored for each downloaded bundle.
@@ -199,7 +201,11 @@ export class StateFile {
   public async update(mutate: (state: PersistedState) => void): Promise<void> {
     mutate(this.state);
     const snapshot = JSON.stringify(this.state, null, 2);
-    this.writeQueue = this.writeQueue.then(() => this.write(snapshot));
+    // A failed write rejects THIS update, but must not poison the
+    // queue: later updates write the then-latest snapshot regardless.
+    this.writeQueue = this.writeQueue
+      .catch(() => undefined)
+      .then(() => this.write(snapshot));
     return this.writeQueue;
   }
 
@@ -213,7 +219,9 @@ export class StateFile {
     } finally {
       await fileHandle.close();
     }
-    await rename(temporaryPath, this.filePath);
+    // Retried: on Windows the rename fails with EPERM while any other
+    // process (antivirus, an external reader) holds the destination.
+    await renameWithRetry(temporaryPath, this.filePath);
     try {
       // Flush the rename itself. Not supported on all platforms
       // (e.g. directories cannot be opened on Windows), so best effort.
@@ -229,7 +237,9 @@ export class StateFile {
   }
 
   public async delete(): Promise<void> {
-    await rm(this.filePath, { force: true });
+    // Retried for the same reason as the rename in write(): deleting
+    // an externally held file fails with EPERM/EBUSY on Windows.
+    await retryOnFileLock(() => rm(this.filePath, { force: true }));
     this.state = createDefaultState();
   }
 }

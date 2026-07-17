@@ -6,6 +6,7 @@
  * Prerequisites: `npm run build` and `npm run build --workspace example`.
  */
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { artifactsDirectory, repositoryRoot } from './helpers.mjs';
@@ -20,6 +21,18 @@ function run(command, args, env = {}) {
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+// The electron npm package no longer downloads its binary via an install
+// script, so a fresh `npm ci` leaves node_modules/electron/dist missing.
+// Fetch it explicitly before the drill copies the distribution.
+const electronPackageDirectory = join(
+  repositoryRoot,
+  'node_modules',
+  'electron',
+);
+if (!existsSync(join(electronPackageDirectory, 'dist'))) {
+  run(process.execPath, [join(electronPackageDirectory, 'install.js')]);
 }
 
 run(process.execPath, [join(repositoryRoot, 'e2e', 'drill.mjs')]);

@@ -37,6 +37,11 @@ export interface DownloadFileOptions {
   destinationPath: string;
   httpTimeout: number;
   onProgress?: (downloadedBytes: number, totalBytes: number) => void;
+  /**
+   * An optional external signal to abort the download (e.g. to cancel
+   * sibling downloads when one of a parallel batch fails).
+   */
+  signal?: AbortSignal;
   url: string;
 }
 
@@ -59,11 +64,13 @@ export async function downloadFile(
   options: DownloadFileOptions,
 ): Promise<DownloadFileResult> {
   const url = assertSecureUrl(options.url);
+  const timeoutSignal = AbortSignal.timeout(options.httpTimeout);
+  const signal = options.signal
+    ? AbortSignal.any([timeoutSignal, options.signal])
+    : timeoutSignal;
   let response: Response;
   try {
-    response = await fetch(url, {
-      signal: AbortSignal.timeout(options.httpTimeout),
-    });
+    response = await fetch(url, { signal });
   } catch (error) {
     throw toRequestError(error);
   }

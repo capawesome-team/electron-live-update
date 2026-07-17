@@ -38,11 +38,17 @@ async function launchExample(
   const userDataDirectory =
     options.userDataDirectory ?? (await createUserDataDirectory());
   const app = await electron.launch({
-    args: [exampleDirectory as string],
+    // `--no-sandbox` lets Electron launch on Linux CI, where the copied
+    // distribution has no setuid sandbox helper and unprivileged user
+    // namespaces are restricted. No-op on macOS and Windows.
+    args: ['--no-sandbox', exampleDirectory as string],
     env: {
       ...(process.env as Record<string, string>),
       EXAMPLE_PUBLIC_KEY: (await getExamplePublicKey()) as string,
-      EXAMPLE_READY_TIMEOUT: '10000',
+      // Generous watchdog ceiling: a spurious rollback (and bundle
+      // block) during a slow CI boot would break these specs. No spec
+      // relies on the watchdog timer firing.
+      EXAMPLE_READY_TIMEOUT: '60000',
       EXAMPLE_SERVER_DOMAIN: mockServer.serverDomain,
       EXAMPLE_SERVING_MODE: options.servingMode ?? 'serve',
       EXAMPLE_USER_DATA: userDataDirectory,
@@ -118,7 +124,7 @@ test('the packaged app boots the built-in bundle from the asar archive', async (
   const userDataDirectory = await createUserDataDirectory();
   const app = await electron.launch({
     executablePath: process.env.E2E_PACKAGED_BINARY as string,
-    args: [],
+    args: ['--no-sandbox'],
     env: {
       ...(process.env as Record<string, string>),
       EXAMPLE_SERVER_DOMAIN: mockServer.serverDomain,

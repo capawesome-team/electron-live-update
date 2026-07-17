@@ -69,6 +69,15 @@ describe('verification', () => {
     await expect(verifyDownloadedFile({ filePath })).resolves.toBeUndefined();
   });
 
+  it('rejects a present-but-empty checksum header', async () => {
+    await expect(
+      verifyDownloadedFile({ filePath, checksum: '' }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.ChecksumMismatch,
+      message: 'Checksum mismatch.',
+    });
+  });
+
   it('verifies a valid signature', async () => {
     const { privateKeyPem, publicKeyPem } = generateRsaKeyPair();
     const signature = signBytes(fileContent, privateKeyPem);
@@ -108,6 +117,20 @@ describe('verification', () => {
     ).rejects.toMatchObject({
       code: ErrorCode.SignatureMissing,
       message: 'Bundle does not contain a signature.',
+    });
+  });
+
+  it('rejects a present-but-empty signature (not treated as missing)', async () => {
+    const { publicKeyPem } = generateRsaKeyPair();
+    await expect(
+      verifyDownloadedFile({
+        filePath,
+        publicKey: publicKeyPem,
+        signature: '',
+      }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.SignatureVerificationFailed,
+      message: 'Signature verification failed.',
     });
   });
 

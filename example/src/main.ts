@@ -28,11 +28,18 @@ app.whenReady().then(async () => {
     webPreferences: { preload: join(__dirname, 'preload.js') },
   });
   liveUpdate.attach(window);
-  if (simpleMode) {
-    const bundlePath = await liveUpdate.getCurrentBundlePath();
-    await window.loadFile(join(bundlePath ?? '', 'index.html'));
-  } else {
-    await window.loadURL(liveUpdate.getServeUrl());
+  try {
+    if (simpleMode) {
+      const bundlePath = await liveUpdate.getCurrentBundlePath();
+      await window.loadFile(join(bundlePath ?? '', 'index.html'));
+    } else {
+      await window.loadURL(liveUpdate.getServeUrl());
+    }
+  } catch (error) {
+    // The initial load is aborted (ERR_ABORTED) when an SDK-initiated
+    // reload (e.g. a rollback) navigates the window while the load is
+    // still pending. The interrupting navigation supersedes this one.
+    console.warn('[example] Initial load was superseded:', error);
   }
 });
 

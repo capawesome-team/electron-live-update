@@ -6,6 +6,26 @@
 export type ArtifactType = 'manifest' | 'zip';
 
 /**
+ * A channel that bundles can be delivered on.
+ *
+ * @since 0.1.0
+ */
+export interface Channel {
+  /**
+   * The unique identifier of the channel.
+   *
+   * @since 0.1.0
+   */
+  id: string;
+  /**
+   * The name of the channel.
+   *
+   * @since 0.1.0
+   */
+  name: string;
+}
+
+/**
  * @since 0.1.0
  */
 export interface DeleteBundleOptions {
@@ -74,6 +94,44 @@ export interface DownloadBundleOptions {
    * @example 'https://example.com/bundle.zip'
    */
   url: string;
+}
+
+/**
+ * @since 0.1.0
+ */
+export interface FetchChannelsOptions {
+  /**
+   * The maximum number of channels to return.
+   *
+   * @since 0.1.0
+   * @default 50
+   */
+  limit?: number;
+  /**
+   * The number of channels to skip.
+   *
+   * @since 0.1.0
+   * @default 0
+   */
+  offset?: number;
+  /**
+   * The query to filter channels by name.
+   *
+   * @since 0.1.0
+   */
+  query?: string;
+}
+
+/**
+ * @since 0.1.0
+ */
+export interface FetchChannelsResult {
+  /**
+   * The list of channels.
+   *
+   * @since 0.1.0
+   */
+  channels: Channel[];
 }
 
 /**
@@ -540,6 +598,16 @@ export interface LiveUpdateApi {
    */
   downloadBundle(options: DownloadBundleOptions): Promise<void>;
   /**
+   * Fetch the available channels using the [Capawesome Cloud](https://capawesome.io/cloud/).
+   *
+   * **Attention**: This method only works for apps with public channels
+   * enabled (Channel Discovery). Private channels can still be selected
+   * with `setChannel(...)`.
+   *
+   * @since 0.1.0
+   */
+  fetchChannels(options?: FetchChannelsOptions): Promise<FetchChannelsResult>;
+  /**
    * Fetch the latest bundle using the [Capawesome Cloud](https://capawesome.io/cloud/).
    *
    * @since 0.1.0
@@ -697,6 +765,16 @@ export interface LiveUpdateApi {
   addListener(
     eventName: 'reloaded',
     listener: ReloadedListener,
+  ): ListenerHandle;
+  /**
+   * Listen for when the engine reverted to a previous bundle because the
+   * app did not signal readiness in time.
+   *
+   * @since 0.1.0
+   */
+  addListener(
+    eventName: 'rolledBack',
+    listener: RolledBackListener,
   ): ListenerHandle;
   /**
    * Remove all listeners of this instance.

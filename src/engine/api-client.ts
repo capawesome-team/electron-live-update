@@ -25,8 +25,24 @@ export interface FetchLatestBundleRequest {
   deviceId: string;
   osVersion: string;
   platform: string;
+  pluginVersion: string;
   runtime: string | null;
-  sdkVersion: string;
+}
+
+export interface FetchChannelsRequest {
+  appId: string;
+  deviceId: string;
+  limit: number;
+  offset: number;
+  query: string | null;
+}
+
+/**
+ * A single channel returned by the Capawesome Cloud channels endpoint.
+ */
+export interface GetChannelsResponseItem {
+  id: string;
+  name: string;
 }
 
 export interface CloudApiClientOptions {
@@ -89,7 +105,7 @@ export class CloudApiClient {
     this.appendQueryParameter(url, 'deviceId', request.deviceId);
     this.appendQueryParameter(url, 'osVersion', request.osVersion);
     this.appendQueryParameter(url, 'platform', request.platform);
-    this.appendQueryParameter(url, 'pluginVersion', request.sdkVersion);
+    this.appendQueryParameter(url, 'pluginVersion', request.pluginVersion);
     this.appendQueryParameter(url, 'runtime', request.runtime);
     let response: Response;
     try {
@@ -121,6 +137,63 @@ export class CloudApiClient {
     return this.parseLatestBundleResponse(json);
   }
 
+  /**
+   * Fetch the available channels for the app.
+   *
+   * Throws `ChannelDiscoveryNotEnabled` on HTTP 401 (public channels
+   * not enabled), mirroring the `@capawesome/capacitor-live-update`
+   * plugin behavior.
+   */
+  public async getChannels(
+    request: FetchChannelsRequest,
+  ): Promise<GetChannelsResponseItem[]> {
+    const url = new URL(
+      `${this.getBaseUrl()}/v1/apps/${encodeURIComponent(request.appId)}/channels`,
+    );
+    this.appendQueryParameter(url, 'limit', String(request.limit));
+    this.appendQueryParameter(url, 'offset', String(request.offset));
+    this.appendQueryParameter(url, 'query', request.query);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          'X-Capawesome-Device-Id': request.deviceId,
+        },
+        signal: AbortSignal.timeout(this.options.httpTimeout),
+      });
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        throw new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
+      }
+      throw new LiveUpdateError(
+        ErrorCode.Unknown,
+        'An unknown error has occurred.',
+      );
+    }
+    if (response.status === 401) {
+      throw new LiveUpdateError(
+        ErrorCode.ChannelDiscoveryNotEnabled,
+        'Unauthorized. Channel Discovery may not be enabled for this app.',
+      );
+    }
+    if (!response.ok) {
+      throw new LiveUpdateError(
+        ErrorCode.Unknown,
+        'An unknown error has occurred.',
+      );
+    }
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      throw new LiveUpdateError(
+        ErrorCode.Unknown,
+        'An unknown error has occurred.',
+      );
+    }
+    return this.parseChannelsResponse(json);
+  }
+
   private appendQueryParameter(
     url: URL,
     name: string,
@@ -129,6 +202,23 @@ export class CloudApiClient {
     if (value !== null && value !== undefined) {
       url.searchParams.append(name, value);
     }
+  }
+
+  private parseChannelsResponse(json: unknown): GetChannelsResponseItem[] {
+    if (!Array.isArray(json)) {
+      return [];
+    }
+    const channels: GetChannelsResponseItem[] = [];
+    for (const entry of json) {
+      if (typeof entry !== 'object' || entry === null) {
+        continue;
+      }
+      const record = entry as Record<string, unknown>;
+      if (typeof record.id === 'string' && typeof record.name === 'string') {
+        channels.push({ id: record.id, name: record.name });
+      }
+    }
+    return channels;
   }
 
   private parseLatestBundleResponse(

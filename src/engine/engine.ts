@@ -8,6 +8,8 @@ import type {
   DeleteBundleOptions,
   DownloadBundleOptions,
   DownloadBundleProgressEvent,
+  FetchChannelsOptions,
+  FetchChannelsResult,
   FetchLatestBundleOptions,
   FetchLatestBundleResult,
   GetBlockedBundlesResult,
@@ -147,6 +149,17 @@ export interface LiveUpdateEngineConfig {
    */
   platform: string;
   /**
+   * The plugin version reported to Capawesome Cloud (the `pluginVersion`
+   * request parameter).
+   *
+   * Defaults to `sdkVersion`. The standalone Electron SDK reports the
+   * engine version; a Capacitor adapter reports the plugin package
+   * version.
+   *
+   * @since 0.1.0
+   */
+  pluginVersion?: string;
+  /**
    * The public key to verify the integrity of the bundle.
    *
    * The public key must be a PEM-encoded RSA public key.
@@ -262,6 +275,8 @@ const DEFAULT_HTTP_TIMEOUT = 60000;
 const DEFAULT_READY_TIMEOUT = 0;
 const DEFAULT_SERVER_DOMAIN = 'api.cloud.capawesome.io';
 const MAX_BLOCKED_BUNDLES = 100;
+const DEFAULT_FETCH_CHANNELS_LIMIT = 50;
+const DEFAULT_FETCH_CHANNELS_OFFSET = 0;
 
 const defaultLogger: LiveUpdateLogger = {
   debug: message => console.debug(`[LiveUpdate] ${message}`),
@@ -295,6 +310,7 @@ export class LiveUpdateEngine {
   private readonly logger: LiveUpdateLogger;
   private readonly osVersion: string;
   private readonly platform: string;
+  private readonly pluginVersion: string;
   private readonly publicKey: string | undefined;
   private readonly readyTimeout: number;
   private rollbackPerformed = false;
@@ -317,6 +333,7 @@ export class LiveUpdateEngine {
     this.logger = config.logger ?? defaultLogger;
     this.osVersion = config.osVersion;
     this.platform = config.platform;
+    this.pluginVersion = config.pluginVersion ?? config.sdkVersion;
     this.publicKey = config.publicKey;
     this.readyTimeout = config.readyTimeout ?? DEFAULT_READY_TIMEOUT;
     this.runtime = config.runtime ?? null;
@@ -563,6 +580,34 @@ export class LiveUpdateEngine {
       downloadUrl: latest.url,
       signature: latest.signature,
     };
+  }
+
+  /**
+   * Fetch the available channels using the [Capawesome Cloud](https://capawesome.io/cloud/).
+   *
+   * Only works for apps with public channels enabled (Channel
+   * Discovery). Throws `ChannelDiscoveryNotEnabled` otherwise.
+   *
+   * @since 0.1.0
+   */
+  public async fetchChannels(
+    options?: FetchChannelsOptions,
+  ): Promise<FetchChannelsResult> {
+    this.assertInitialized();
+    if (!this.appId) {
+      throw new LiveUpdateError(
+        ErrorCode.AppIdMissing,
+        'appId must be configured.',
+      );
+    }
+    const channels = await this.apiClient.getChannels({
+      appId: this.appId,
+      deviceId: await this.getOrCreateDeviceId(),
+      limit: options?.limit ?? DEFAULT_FETCH_CHANNELS_LIMIT,
+      offset: options?.offset ?? DEFAULT_FETCH_CHANNELS_OFFSET,
+      query: options?.query ?? null,
+    });
+    return { channels };
   }
 
   /**
@@ -889,8 +934,8 @@ export class LiveUpdateEngine {
       deviceId: await this.getOrCreateDeviceId(),
       osVersion: this.osVersion,
       platform: this.platform,
+      pluginVersion: this.pluginVersion,
       runtime: this.runtime,
-      sdkVersion: this.sdkVersion,
     });
   }
 
