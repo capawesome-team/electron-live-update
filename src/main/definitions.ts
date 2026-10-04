@@ -190,7 +190,7 @@ export interface ServeOptions {
  *
  * @since 0.1.0
  */
-export interface LiveUpdate extends LiveUpdateApi {
+export interface LiveUpdateHost extends LiveUpdateApi {
   /**
    * Register a window with the SDK.
    *

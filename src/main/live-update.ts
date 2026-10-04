@@ -51,7 +51,11 @@ import {
   type IpcResult,
 } from '../shared/ipc';
 
-import type { LiveUpdate, LiveUpdateConfig, ServeOptions } from './definitions';
+import type {
+  LiveUpdateConfig,
+  LiveUpdateHost,
+  ServeOptions,
+} from './definitions';
 import { resolveServedFile } from './serving';
 
 const DEFAULT_SCHEME = 'capawesome-live-update';
@@ -69,7 +73,7 @@ const defaultLogger: LiveUpdateLogger = {
 
 let ipcRegistered = false;
 
-class LiveUpdateImpl implements LiveUpdate {
+class ElectronLiveUpdateHost implements LiveUpdateHost {
   private readonly attachedWindows = new Set<BrowserWindow>();
   private readonly defaultBundlePath: string | undefined;
   private readonly emitter = new EventEmitter();
@@ -549,6 +553,8 @@ class LiveUpdateImpl implements LiveUpdate {
  *
  * @since 0.1.0
  */
-export function createLiveUpdate(config: LiveUpdateConfig = {}): LiveUpdate {
-  return new LiveUpdateImpl(config);
+export function createLiveUpdate(
+  config: LiveUpdateConfig = {},
+): LiveUpdateHost {
+  return new ElectronLiveUpdateHost(config);
 }

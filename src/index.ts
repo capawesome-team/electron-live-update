@@ -3,7 +3,7 @@ export { ErrorCode, LiveUpdateError } from './engine/errors';
 export type { LiveUpdateLogger } from './engine/engine';
 export type {
   AutoUpdateStrategy,
-  LiveUpdate,
+  LiveUpdateHost,
   LiveUpdateConfig,
   ServeOptions,
 } from './main/definitions';

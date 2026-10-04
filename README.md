@@ -246,7 +246,7 @@ Creates the SDK. Call once, early in your main process (before `app.whenReady()`
 
 #### Methods
 
-The returned `LiveUpdate` object implements the shared vocabulary — the same methods you know from the Capacitor plugin:
+The returned `LiveUpdateHost` object implements the shared vocabulary — the same methods you know from the Capacitor plugin:
 
 `clearBlockedBundles()`, `deleteBundle(options)`, `downloadBundle(options)`, `fetchChannels(options?)`, `fetchLatestBundle(options?)`, `getBlockedBundles()`, `getChannel()`, `getCurrentBundle()`, `getCustomId()`, `getDeviceId()`, `getDownloadedBundles()`, `getNextBundle()`, `getVersionCode()`, `getVersionName()`, `isSyncing()`, `ready()`, `reload()`, `reset()`, `setChannel(options)`, `setCustomId(options)`, `setNextBundle(options)`, `sync(options?)`, `addListener(eventName, listener)`, `removeAllListeners()`
 
