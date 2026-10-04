@@ -15,7 +15,7 @@ export interface GetLatestBundleResponse {
   url: string;
 }
 
-export interface FetchLatestBundleRequest {
+export interface GetLatestBundleRequest {
   appId: string;
   appVersionCode: string;
   appVersionName: string;
@@ -29,7 +29,7 @@ export interface FetchLatestBundleRequest {
   runtime: string | null;
 }
 
-export interface FetchChannelsRequest {
+export interface GetChannelsRequest {
   appId: string;
   deviceId: string;
   limit: number;
@@ -87,7 +87,7 @@ export class CloudApiClient {
    * timeouts and network errors are surfaced as errors.
    */
   public async getLatestBundle(
-    request: FetchLatestBundleRequest,
+    request: GetLatestBundleRequest,
   ): Promise<GetLatestBundleResponse | null> {
     const url = new URL(
       `${this.getBaseUrl()}/v1/apps/${encodeURIComponent(request.appId)}/bundles/latest`,
@@ -117,7 +117,7 @@ export class CloudApiClient {
    * plugin behavior.
    */
   public async getChannels(
-    request: FetchChannelsRequest,
+    request: GetChannelsRequest,
   ): Promise<GetChannelsResponseItem[]> {
     const url = new URL(
       `${this.getBaseUrl()}/v1/apps/${encodeURIComponent(request.appId)}/channels`,
