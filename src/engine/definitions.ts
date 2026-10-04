@@ -381,7 +381,7 @@ export interface ReadyResult {
    */
   previousBundleId: string | null;
   /**
-   * Whether or not the app was reset to a previous bundle.
+   * Whether or not the app was reset to the default bundle.
    *
    * @since 0.1.0
    */
@@ -526,7 +526,7 @@ export interface NextBundleSetEvent {
 }
 
 /**
- * Event that is emitted when the engine reverted to a previous bundle
+ * Event that is emitted when the engine reverted to the default bundle
  * because the app did not signal readiness in time.
  *
  * @since 0.1.0
@@ -586,7 +586,7 @@ export type NextBundleSetListener = (event: NextBundleSetEvent) => void;
 export type ReloadedListener = () => void;
 
 /**
- * Listener for when the engine reverted to a previous bundle.
+ * Listener for when the engine reverted to the default bundle.
  *
  * @since 0.1.0
  */
@@ -712,7 +712,7 @@ export interface LiveUpdateApi {
    * Notify the SDK that the app is ready to use and no rollback is needed.
    *
    * **Attention**: This method should be called as soon as the app is ready to use
-   * to prevent the app from being reset to a previous bundle.
+   * to prevent the app from being reset to the default bundle.
    *
    * @since 0.1.0
    */
@@ -794,8 +794,8 @@ export interface LiveUpdateApi {
     listener: ReloadedListener,
   ): ListenerHandle;
   /**
-   * Listen for when the engine reverted to a previous bundle because the
-   * app did not signal readiness in time.
+   * Listen for when the engine reverted to the default bundle because
+   * the app did not signal readiness in time.
    *
    * @since 0.1.0
    */

@@ -171,7 +171,7 @@ export interface LiveUpdateEngineConfig {
   publicKey?: string;
   /**
    * The timeout in milliseconds to wait for the app to be ready
-   * before rolling back to the previous bundle.
+   * before rolling back to the default bundle.
    *
    * It is strongly **recommended** to configure this option (e.g. `10000` ms)
    * so that the SDK can roll back in case of problems: if configured, the
@@ -241,7 +241,7 @@ export interface InitializeResult {
    */
   currentBundleId: string | null;
   /**
-   * Whether the engine rolled back to a previous bundle because the
+   * Whether the engine rolled back to the default bundle because the
    * last boot died before the app signaled readiness.
    *
    * @since 0.1.0
@@ -358,8 +358,7 @@ export class LiveUpdateEngine {
    * engine first resets to the default bundle. Then the kill-safe
    * rollback happens: if the
    * previous boot wrote a pending-boot marker that was never cleared
-   * by `ready()`, the engine reverts to the last bundle that
-   * successfully signaled readiness (or the default bundle) and
+   * by `ready()`, the engine reverts to the default bundle and
    * blocks the failed bundle if `autoBlockRolledBackBundles` is
    * enabled. Afterwards, a pending next bundle is promoted to the
    * current bundle and, if rollback protection is active, a new
@@ -381,21 +380,10 @@ export class LiveUpdateEngine {
       this.logger.warn(
         `The app was not ready within the last boot of bundle '${failedBundleId}'. Rolling back.`,
       );
-      // A pending next bundle different from the failed one wins over
-      // the fallback: it may be the fix that was synced in the background.
-      const preferred =
-        originalNext !== null && originalNext !== failedBundleId
-          ? originalNext
-          : undefined;
-      const target = await this.resolveUsableBundle(
-        preferred === undefined
-          ? [state.lastSuccessfulBundleId]
-          : [preferred, state.lastSuccessfulBundleId],
-      );
       await this.stateFile.update(s => {
         s.previousBundleId = failedBundleId;
-        s.currentBundleId = target;
-        s.nextBundleId = target;
+        s.currentBundleId = null;
+        s.nextBundleId = null;
         s.pendingBoot = null;
         if (this.autoBlockRolledBackBundles) {
           this.blockBundleIdInState(s, failedBundleId);
@@ -423,13 +411,12 @@ export class LiveUpdateEngine {
     // The current bundle may have been deleted or corrupted externally.
     const currentBundleId = this.stateFile.get().currentBundleId;
     if (currentBundleId !== null && !(await this.store.has(currentBundleId))) {
-      this.logger.warn(`Bundle '${currentBundleId}' is missing. Falling back.`);
-      const target = await this.resolveUsableBundle([
-        this.stateFile.get().lastSuccessfulBundleId,
-      ]);
+      this.logger.warn(
+        `Bundle '${currentBundleId}' is missing. Falling back to the default bundle.`,
+      );
       await this.stateFile.update(s => {
-        s.currentBundleId = target;
-        s.nextBundleId = target;
+        s.currentBundleId = null;
+        s.nextBundleId = null;
       });
     }
     this.initialized = true;
@@ -494,9 +481,6 @@ export class LiveUpdateEngine {
     };
     await this.stateFile.update(s => {
       s.pendingBoot = null;
-      if (s.currentBundleId !== null) {
-        s.lastSuccessfulBundleId = s.currentBundleId;
-      }
       s.previousBundleId = s.currentBundleId;
     });
     this.rollbackPerformed = false;
@@ -631,9 +615,9 @@ export class LiveUpdateEngine {
    * Delete a bundle from the app.
    *
    * Like the Android plugin, the current bundle may be deleted as well.
-   * The engine then falls back to the last successful bundle (or the
-   * default bundle) on the next start. If the deleted bundle is the next
-   * bundle, the next bundle is reset to the default bundle.
+   * The engine then falls back to the default bundle on the next start.
+   * If the deleted bundle is the next bundle, the next bundle is reset
+   * to the default bundle.
    *
    * @since 0.1.0
    */
@@ -650,9 +634,6 @@ export class LiveUpdateEngine {
       delete s.bundles[options.bundleId];
       if (s.nextBundleId === options.bundleId) {
         s.nextBundleId = null;
-      }
-      if (s.lastSuccessfulBundleId === options.bundleId) {
-        s.lastSuccessfulBundleId = null;
       }
     });
   }
@@ -1085,25 +1066,6 @@ export class LiveUpdateEngine {
   }
 
   /**
-   * Return the first usable bundle of the given candidates, falling
-   * back to `null` (the default bundle). Candidates are verified
-   * against their install-time checksums.
-   */
-  private async resolveUsableBundle(
-    candidates: (string | null)[],
-  ): Promise<string | null> {
-    for (const candidate of candidates) {
-      if (candidate === null) {
-        continue;
-      }
-      if (await this.verifyBundleForActivation(candidate)) {
-        return candidate;
-      }
-    }
-    return null;
-  }
-
-  /**
    * Mirror the Capacitor runtime and the Android plugin: an app update
    * ships a new default bundle, so live update bundles of the previous
    * app version are no longer loaded and the runtime configuration is
@@ -1120,7 +1082,6 @@ export class LiveUpdateEngine {
     await this.stateFile.update(s => {
       s.appIdOverride = null;
       s.currentBundleId = null;
-      s.lastSuccessfulBundleId = null;
       s.lastVersionCode = this.versionCode;
       s.nextBundleId = null;
       s.pendingBoot = null;
@@ -1144,8 +1105,7 @@ export class LiveUpdateEngine {
 
   /**
    * Arm the kill-safe pending-boot marker and the in-process watchdog
-   * for the current bundle if it has not yet proven itself. Called
-   * after boot and after every reload.
+   * for the current bundle. Called after boot and after every reload.
    */
   private async armRollbackProtection(): Promise<void> {
     if (this.readyTimeout <= 0) {
@@ -1153,10 +1113,7 @@ export class LiveUpdateEngine {
     }
     const state = this.stateFile.get();
     const currentBundleId = state.currentBundleId;
-    if (
-      currentBundleId === null ||
-      currentBundleId === state.lastSuccessfulBundleId
-    ) {
+    if (currentBundleId === null) {
       if (state.pendingBoot) {
         await this.stateFile.update(s => {
           s.pendingBoot = null;
@@ -1198,19 +1155,13 @@ export class LiveUpdateEngine {
     if (failedBundleId === null) {
       return;
     }
-    const target = await this.resolveUsableBundle([
-      state.lastSuccessfulBundleId,
-    ]);
-    if (target === failedBundleId) {
-      return;
-    }
     this.logger.warn(
-      `The app was not ready within ${this.readyTimeout} ms. Rolling back.`,
+      `The app was not ready within ${this.readyTimeout} ms. Rolling back to the default bundle.`,
     );
     await this.stateFile.update(s => {
       s.previousBundleId = failedBundleId;
-      s.currentBundleId = target;
-      s.nextBundleId = target;
+      s.currentBundleId = null;
+      s.nextBundleId = null;
       s.pendingBoot = null;
       if (this.autoBlockRolledBackBundles) {
         this.blockBundleIdInState(s, failedBundleId);
@@ -1218,7 +1169,7 @@ export class LiveUpdateEngine {
     });
     this.rollbackPerformed = true;
     this.emit('rolledBack', {
-      currentBundleId: target,
+      currentBundleId: null,
       previousBundleId: failedBundleId,
     });
   }
@@ -1226,11 +1177,9 @@ export class LiveUpdateEngine {
   private async deleteUnusedBundles(): Promise<void> {
     const state = this.stateFile.get();
     const usedBundleIds = new Set(
-      [
-        state.currentBundleId,
-        state.nextBundleId,
-        state.lastSuccessfulBundleId,
-      ].filter((bundleId): bundleId is string => bundleId !== null),
+      [state.currentBundleId, state.nextBundleId].filter(
+        (bundleId): bundleId is string => bundleId !== null,
+      ),
     );
     for (const bundleId of await this.store.list()) {
       if (!usedBundleIds.has(bundleId)) {

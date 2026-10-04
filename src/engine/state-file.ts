@@ -22,7 +22,7 @@ export interface BundleMetadata {
 }
 
 /**
- * The marker that is written to disk BEFORE a not-yet-proven bundle
+ * The marker that is written to disk BEFORE a live update bundle
  * is loaded. It is cleared by `ready()`. If it is still present at
  * the next process start, the previous boot died before the app
  * became ready and the engine rolls back.
@@ -49,7 +49,6 @@ export interface PersistedState {
   currentBundleId: string | null;
   customId: string | null;
   deviceIds: { [appId: string]: string };
-  lastSuccessfulBundleId: string | null;
   /**
    * The app version code of the last start, used to detect app updates.
    */
@@ -70,7 +69,6 @@ function createDefaultState(): PersistedState {
     currentBundleId: null,
     customId: null,
     deviceIds: {},
-    lastSuccessfulBundleId: null,
     lastVersionCode: null,
     nextBundleId: null,
     pendingBoot: null,
@@ -132,9 +130,6 @@ function normalizeState(raw: unknown): PersistedState {
         state.deviceIds[appId] = deviceId;
       }
     }
-  }
-  if (typeof record.lastSuccessfulBundleId === 'string') {
-    state.lastSuccessfulBundleId = record.lastSuccessfulBundleId;
   }
   if (typeof record.lastVersionCode === 'string') {
     state.lastVersionCode = record.lastVersionCode;

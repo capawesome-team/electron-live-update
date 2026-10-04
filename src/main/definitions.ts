@@ -124,7 +124,7 @@ export interface LiveUpdateConfig {
   publicKey?: string;
   /**
    * The timeout in milliseconds to wait for the app to be ready
-   * before rolling back to the previous bundle.
+   * before rolling back to the default bundle.
    *
    * It is strongly **recommended** to configure this option (e.g. `10000` ms)
    * so that the SDK can roll back in case of problems: if configured, the

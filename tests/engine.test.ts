@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -395,6 +395,35 @@ describe('LiveUpdateEngine', () => {
       expect(result).toEqual({ currentBundleId: null, rollback: false });
     });
 
+    it('falls back to the default bundle when the current bundle is missing', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await serveBundleZip('1.1.0');
+      await engine.downloadBundle({
+        bundleId: '1.1.0',
+        url: `${server.origin}/download/1.1.0.zip`,
+      });
+      await engine.setNextBundle({ bundleId: '1.1.0' });
+      await engine.applyNextBundle();
+      await engine.ready();
+      await serveBundleZip('1.2.0');
+      await engine.downloadBundle({
+        bundleId: '1.2.0',
+        url: `${server.origin}/download/1.2.0.zip`,
+      });
+      await engine.setNextBundle({ bundleId: '1.2.0' });
+      await engine.applyNextBundle();
+      await engine.ready();
+      await rm(join(dataDirectory, 'bundles', '1.2.0'), {
+        recursive: true,
+        force: true,
+      });
+      const restartedEngine = createEngine();
+      const result = await restartedEngine.initialize();
+      expect(result).toEqual({ currentBundleId: null, rollback: false });
+      expect((await restartedEngine.getNextBundle()).bundleId).toBeNull();
+    });
+
     it('deleteBundle rejects unknown bundles', async () => {
       const engine = createEngine();
       await engine.initialize();
@@ -453,7 +482,7 @@ describe('LiveUpdateEngine', () => {
       await engine.applyNextBundle();
     }
 
-    it('writes the pending-boot marker before an unproven bundle boots', async () => {
+    it('writes the pending-boot marker before a bundle boots', async () => {
       const engine = createEngine({ readyTimeout: 10000 });
       await engine.initialize();
       await installAndActivate(engine, '1.1.0');
@@ -474,7 +503,7 @@ describe('LiveUpdateEngine', () => {
       expect(state.pendingBoot).toBeNull();
     });
 
-    it('ready() clears the marker and records the bundle as successful', async () => {
+    it('ready() clears the marker', async () => {
       const engine = createEngine({ readyTimeout: 10000 });
       await engine.initialize();
       await installAndActivate(engine, '1.1.0');
@@ -488,7 +517,6 @@ describe('LiveUpdateEngine', () => {
         await readFile(join(dataDirectory, 'state.json'), 'utf8'),
       );
       expect(state.pendingBoot).toBeNull();
-      expect(state.lastSuccessfulBundleId).toBe('1.1.0');
       expect(state.previousBundleId).toBe('1.1.0');
     });
 
@@ -518,8 +546,7 @@ describe('LiveUpdateEngine', () => {
       });
     });
 
-    it('rolls back to the last successful bundle, not the default bundle', async () => {
-      // Boot and prove 1.1.0.
+    it('rolls back to the default bundle on the next start, not to a bundle that called ready before', async () => {
       const engine = createEngine({ readyTimeout: 10000 });
       await engine.initialize();
       await installAndActivate(engine, '1.1.0');
@@ -528,12 +555,11 @@ describe('LiveUpdateEngine', () => {
       await installAndActivate(engine, '1.2.0');
       const relaunchedEngine = createEngine({ readyTimeout: 10000 });
       const result = await relaunchedEngine.initialize();
-      expect(result).toEqual({ currentBundleId: '1.1.0', rollback: true });
+      expect(result).toEqual({ currentBundleId: null, rollback: true });
+      expect((await relaunchedEngine.getNextBundle()).bundleId).toBeNull();
     });
 
-    it('a pending next bundle wins over the rollback fallback', async () => {
-      // 1.1.0 dies during boot, but 1.2.0 was already synced as next
-      // (e.g. a fix pushed while the app was broken).
+    it('rolls back to the default bundle on the next start even if a next bundle is pending', async () => {
       const engine = createEngine({ readyTimeout: 10000 });
       await engine.initialize();
       await installAndActivate(engine, '1.1.0');
@@ -545,21 +571,21 @@ describe('LiveUpdateEngine', () => {
       await engine.setNextBundle({ bundleId: '1.2.0' });
       const relaunchedEngine = createEngine({ readyTimeout: 10000 });
       const result = await relaunchedEngine.initialize();
-      expect(result).toEqual({ currentBundleId: '1.2.0', rollback: true });
+      expect(result).toEqual({ currentBundleId: null, rollback: true });
+      expect((await relaunchedEngine.getNextBundle()).bundleId).toBeNull();
     });
 
-    it('does not roll back a proven bundle that is killed during boot', async () => {
+    it('rolls back a bundle that called ready before when a later boot is killed', async () => {
       const engine = createEngine({ readyTimeout: 10000 });
       await engine.initialize();
       await installAndActivate(engine, '1.1.0');
       await engine.ready();
-      // Relaunch the proven bundle and kill it before ready: no marker
-      // is armed for proven bundles, so no rollback happens.
+      // Relaunch 1.1.0 and kill it before ready.
       const secondRun = createEngine({ readyTimeout: 10000 });
       await secondRun.initialize();
       const thirdRun = createEngine({ readyTimeout: 10000 });
       const result = await thirdRun.initialize();
-      expect(result).toEqual({ currentBundleId: '1.1.0', rollback: false });
+      expect(result).toEqual({ currentBundleId: null, rollback: true });
     });
 
     it('the watchdog rolls back a running app that never calls ready', async () => {
@@ -587,7 +613,7 @@ describe('LiveUpdateEngine', () => {
       expect(readyResult.rollback).toBe(true);
     });
 
-    it('clears the marker when reloading from an unproven to the default bundle', async () => {
+    it('clears the marker when reloading from a bundle to the default bundle', async () => {
       const engine = createEngine({
         readyTimeout: 10000,
         autoBlockRolledBackBundles: true,
@@ -607,7 +633,7 @@ describe('LiveUpdateEngine', () => {
       );
     });
 
-    it('the watchdog does not roll back a proven bundle', async () => {
+    it('the watchdog rolls back to the default bundle even if the bundle called ready before', async () => {
       const engine = createEngine({
         readyTimeout: 250,
         autoBlockRolledBackBundles: true,
@@ -617,12 +643,15 @@ describe('LiveUpdateEngine', () => {
       await engine.ready();
       const rolledBackEvents: RolledBackEvent[] = [];
       engine.on('rolledBack', event => rolledBackEvents.push(event));
-      // Reload the proven bundle and never call ready().
+      // Reload the bundle and never call ready().
       await engine.applyNextBundle();
       await new Promise(resolve => setTimeout(resolve, 600));
-      expect(rolledBackEvents).toEqual([]);
-      expect((await engine.getCurrentBundle()).bundleId).toBe('1.1.0');
-      expect((await engine.getBlockedBundles()).bundleIds).toEqual([]);
+      expect(rolledBackEvents).toEqual([
+        { currentBundleId: null, previousBundleId: '1.1.0' },
+      ]);
+      expect((await engine.getCurrentBundle()).bundleId).toBeNull();
+      expect((await engine.getNextBundle()).bundleId).toBeNull();
+      expect((await engine.getBlockedBundles()).bundleIds).toEqual(['1.1.0']);
     });
 
     it('ready() stops the watchdog', async () => {
@@ -720,11 +749,10 @@ describe('LiveUpdateEngine', () => {
       const state = JSON.parse(
         await readFile(join(dataDirectory, 'state.json'), 'utf8'),
       );
-      expect(state.lastSuccessfulBundleId).toBeNull();
       expect(state.lastVersionCode).toBe('2');
     });
 
-    it('does not roll back an unproven bundle of the previous app version', async () => {
+    it('does not roll back a bundle of the previous app version', async () => {
       const engine = createEngine({ readyTimeout: 10000 });
       await engine.initialize();
       await serveBundleZip('1.1.0');

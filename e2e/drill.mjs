@@ -3,12 +3,12 @@
  *
  * Scenario:
  * 1. The app syncs and boots the good bundle 2.0.0, which signals
- *    readiness (2.0.0 becomes the last successful bundle).
+ *    readiness.
  * 2. The broken bundle 3.0.0-broken is synced and activated on the
  *    next launch. It never calls ready(). The process is force-killed
  *    during boot, before any timer can fire.
  * 3. On relaunch, the engine must detect the uncleared pending-boot
- *    marker, revert to 2.0.0 (NOT the built-in bundle) and block
+ *    marker, revert to the built-in bundle and block
  *    3.0.0-broken. A further sync that still offers the broken bundle
  *    must skip it.
  *
@@ -207,10 +207,9 @@ async function main() {
     );
     await waitForState(
       userDataDirectory,
-      '2.0.0 proven and 3.0.0-broken pending',
+      '2.0.0 ready and 3.0.0-broken pending',
       state =>
         state.currentBundleId === '2.0.0' &&
-        state.lastSuccessfulBundleId === '2.0.0' &&
         state.pendingBoot === null &&
         state.nextBundleId === '3.0.0-broken',
     );
@@ -243,7 +242,7 @@ async function main() {
     );
 
     // Run 4: the engine must detect the uncleared marker, revert to
-    // the last successful bundle and block the broken one.
+    // the built-in bundle and block the broken one.
     console.log('[drill] Run 4: relaunch and verify the rollback...');
     app = launchApp(
       binaryPath,
@@ -253,17 +252,17 @@ async function main() {
     );
     await waitForState(
       userDataDirectory,
-      'rolled back to 2.0.0 with 3.0.0-broken blocked',
+      'rolled back to the built-in bundle with 3.0.0-broken blocked',
       state =>
-        state.currentBundleId === '2.0.0' &&
+        state.currentBundleId === null &&
         state.pendingBoot === null &&
         state.blockedBundleIds.includes('3.0.0-broken'),
     );
-    // The renderer of 2.0.0 must come up and call ready() again.
+    // The built-in renderer must come up and call ready().
     await waitForState(
       userDataDirectory,
       'ready() called after the rollback',
-      state => state.previousBundleId === '2.0.0',
+      state => state.previousBundleId === null,
     );
     // The mock server still offers the broken bundle; the background
     // sync of this run must have skipped it because it is blocked.
@@ -274,7 +273,7 @@ async function main() {
       '3.0.0-broken',
       'blocked bundle must not be set as next again',
     );
-    assert.equal(finalState.currentBundleId, '2.0.0');
+    assert.equal(finalState.currentBundleId, null);
     killHard(app);
 
     console.log(
