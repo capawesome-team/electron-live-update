@@ -100,6 +100,8 @@ test('syncs, reloads into the new bundle and keeps localStorage (stable origin)'
 test('rejects a tampered bundle (signature verification)', async () => {
   await mockServer.setLatest('2.0.0-evil');
   const { app, page } = await launchExample();
+  // The marker is set in the same task that attaches the click handlers.
+  await expect(page.getByTestId('marker')).toHaveText('built-in');
   await page.getByTestId('sync').click();
   await expect(page.getByTestId('error')).toHaveText(
     'Signature verification failed.',
