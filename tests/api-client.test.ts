@@ -119,16 +119,36 @@ describe('CloudApiClient', () => {
     });
   });
 
-  it('treats unknown artifact types as zip', async () => {
+  it('defaults the artifact type to zip', async () => {
     server.route('/v1/apps/app-123/bundles/latest', {
       body: JSON.stringify({
         bundleId: '1.1.0',
         url: 'https://example.com/b.zip',
-        artifactType: 'something',
       }),
     });
     const response = await client.getLatestBundle(request);
     expect(response?.artifactType).toBe('zip');
+  });
+
+  it('throws ARTIFACT_TYPE_NOT_SUPPORTED for non-zip artifact types', async () => {
+    server.route('/v1/apps/app-123/bundles/latest', {
+      body: JSON.stringify({
+        artifactType: 'manifest',
+        bundleId: '1.1.0',
+        url: 'https://example.com/b',
+      }),
+    });
+    await expect(client.getLatestBundle(request)).rejects.toMatchObject({
+      code: ErrorCode.ArtifactTypeNotSupported,
+    });
+  });
+
+  it('returns null on 400', async () => {
+    server.route('/v1/apps/app-123/bundles/latest', {
+      body: JSON.stringify({ message: 'Invalid app version.' }),
+      status: 400,
+    });
+    expect(await client.getLatestBundle(request)).toBeNull();
   });
 
   it('returns null on 404', async () => {
@@ -147,14 +167,17 @@ describe('CloudApiClient', () => {
     expect(await client.getLatestBundle(request)).toBeNull();
   });
 
-  it('returns null on network errors', async () => {
-    await server.stop();
+  it('throws on network errors', async () => {
     const unreachableClient = new CloudApiClient({
       httpTimeout: 5000,
       serverDomain: '127.0.0.1:1',
     });
-    expect(await unreachableClient.getLatestBundle(request)).toBeNull();
-    await server.start();
+    await expect(
+      unreachableClient.getLatestBundle(request),
+    ).rejects.toMatchObject({
+      code: ErrorCode.Unknown,
+      message: 'An unknown error has occurred.',
+    });
   });
 
   it('throws HTTP_TIMEOUT when the request times out', async () => {

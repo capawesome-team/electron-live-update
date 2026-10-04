@@ -3,7 +3,7 @@
  *
  * @since 0.1.0
  */
-export type ArtifactType = 'manifest' | 'zip';
+export type ArtifactType = 'zip';
 
 /**
  * A channel that bundles can be delivered on.
@@ -44,9 +44,6 @@ export interface DeleteBundleOptions {
 export interface DownloadBundleOptions {
   /**
    * The artifact type of the bundle.
-   *
-   * **Attention**: The `manifest` artifact type is not yet supported
-   * by this SDK.
    *
    * @since 0.1.0
    * @default 'zip'
@@ -242,6 +239,21 @@ export interface GetChannelResult {
 /**
  * @since 0.1.0
  */
+export interface GetConfigResult {
+  /**
+   * The app ID used to identify the app.
+   *
+   * If `null`, no app ID is configured.
+   *
+   * @since 0.1.0
+   * @example '6e351b4f-69a7-415e-a057-4567df7ffe94'
+   */
+  appId: string | null;
+}
+
+/**
+ * @since 0.1.0
+ */
 export interface GetCurrentBundleResult {
   /**
    * The unique identifier of the current bundle.
@@ -388,6 +400,21 @@ export interface SetChannelOptions {
    * @since 0.1.0
    */
   channel: string | null;
+}
+
+/**
+ * @since 0.1.0
+ */
+export interface SetConfigOptions {
+  /**
+   * The app ID used to identify the app.
+   *
+   * Set `null` to reset to the configured value.
+   *
+   * @since 0.1.0
+   * @example '6e351b4f-69a7-415e-a057-4567df7ffe94'
+   */
+  appId?: string | null;
 }
 
 /**

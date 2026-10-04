@@ -1,5 +1,5 @@
 import type { ArtifactType } from './definitions';
-import { isTimeoutError } from './download';
+import { isLocalhost, isTimeoutError } from './download';
 import { ErrorCode, LiveUpdateError } from './errors';
 
 /**
@@ -76,20 +76,15 @@ export class CloudApiClient {
     } catch {
       hostname = serverDomain;
     }
-    const isLocalhost =
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '[::1]' ||
-      hostname.endsWith('.localhost');
-    return `${isLocalhost ? 'http' : 'https'}://${serverDomain}`;
+    return `${isLocalhost(hostname) ? 'http' : 'https'}://${serverDomain}`;
   }
 
   /**
    * Fetch the latest bundle for the app.
    *
-   * Returns `null` if no bundle is available. Any non-2xx response is
-   * treated as "no bundle available", matching the plugin behavior.
-   * Timeouts are surfaced as errors.
+   * Returns `null` if no bundle is available. Like the Android plugin,
+   * any non-2xx response is treated as "no bundle available", while
+   * timeouts and network errors are surfaced as errors.
    */
   public async getLatestBundle(
     request: FetchLatestBundleRequest,
@@ -107,34 +102,11 @@ export class CloudApiClient {
     this.appendQueryParameter(url, 'platform', request.platform);
     this.appendQueryParameter(url, 'pluginVersion', request.pluginVersion);
     this.appendQueryParameter(url, 'runtime', request.runtime);
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          'X-Capawesome-Device-Id': request.deviceId,
-        },
-        signal: AbortSignal.timeout(this.options.httpTimeout),
-      });
-    } catch (error) {
-      if (isTimeoutError(error)) {
-        throw new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
-      }
-      // Network errors mean no update is available right now.
-      return null;
-    }
+    const response = await this.request(url, request.deviceId);
     if (!response.ok) {
       return null;
     }
-    let json: unknown;
-    try {
-      json = await response.json();
-    } catch {
-      throw new LiveUpdateError(
-        ErrorCode.Unknown,
-        'An unknown error has occurred.',
-      );
-    }
-    return this.parseLatestBundleResponse(json);
+    return this.parseLatestBundleResponse(response.json);
   }
 
   /**
@@ -153,23 +125,7 @@ export class CloudApiClient {
     this.appendQueryParameter(url, 'limit', String(request.limit));
     this.appendQueryParameter(url, 'offset', String(request.offset));
     this.appendQueryParameter(url, 'query', request.query);
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          'X-Capawesome-Device-Id': request.deviceId,
-        },
-        signal: AbortSignal.timeout(this.options.httpTimeout),
-      });
-    } catch (error) {
-      if (isTimeoutError(error)) {
-        throw new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
-      }
-      throw new LiveUpdateError(
-        ErrorCode.Unknown,
-        'An unknown error has occurred.',
-      );
-    }
+    const response = await this.request(url, request.deviceId);
     if (response.status === 401) {
       throw new LiveUpdateError(
         ErrorCode.ChannelDiscoveryNotEnabled,
@@ -182,16 +138,34 @@ export class CloudApiClient {
         'An unknown error has occurred.',
       );
     }
-    let json: unknown;
+    return this.parseChannelsResponse(response.json);
+  }
+
+  /**
+   * Send a GET request. The JSON body is only parsed for 2xx responses.
+   */
+  private async request(
+    url: URL,
+    deviceId: string,
+  ): Promise<{ json: unknown; ok: boolean; status: number }> {
     try {
-      json = await response.json();
-    } catch {
+      const response = await fetch(url, {
+        headers: {
+          'X-Capawesome-Device-Id': deviceId,
+        },
+        signal: AbortSignal.timeout(this.options.httpTimeout),
+      });
+      const json: unknown = response.ok ? await response.json() : null;
+      return { json, ok: response.ok, status: response.status };
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        throw new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
+      }
       throw new LiveUpdateError(
         ErrorCode.Unknown,
         'An unknown error has occurred.',
       );
     }
-    return this.parseChannelsResponse(json);
   }
 
   private appendQueryParameter(
@@ -244,8 +218,17 @@ export class CloudApiClient {
         }
       }
     }
+    if (
+      typeof record.artifactType === 'string' &&
+      record.artifactType !== 'zip'
+    ) {
+      throw new LiveUpdateError(
+        ErrorCode.ArtifactTypeNotSupported,
+        'The artifact type is not supported by this SDK.',
+      );
+    }
     return {
-      artifactType: record.artifactType === 'manifest' ? 'manifest' : 'zip',
+      artifactType: 'zip',
       bundleId: record.bundleId,
       channelName:
         typeof record.channelName === 'string' ? record.channelName : undefined,

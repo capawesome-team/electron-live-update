@@ -193,7 +193,7 @@ const engine = new LiveUpdateEngine({
   osVersion: '...',
   versionCode: '1',
   versionName: '1.0.0',
-  sdkVersion: '0.1.0',
+  pluginVersion: '0.1.0',
   readyTimeout: 10000,
 });
 const { currentBundleId } = await engine.initialize(); // BEFORE loading web content
@@ -215,7 +215,7 @@ The API mirrors [`@capawesome/capacitor-live-update`](https://capawesome.io/plug
 | `versionCode` / `versionName` | Native app version                      | `app.getVersion()` unless configured                                      |
 | Device ID                     | Random UUID (Android) / vendor ID (iOS) | Random UUID, persisted per app ID                                         |
 | Serving                       | Capacitor WebView                       | `serve()` custom scheme or `getCurrentBundlePath()`                       |
-| `setConfig()`                 | Available                               | Not available                                                             |
+| `setConfig()`                 | Available                               | Engine only (`LiveUpdateEngine`)                                          |
 | `fetchChannels()`             | Available                               | **Available**                                                             |
 | `manifest` artifact type      | Available (delta updates)               | Not yet available (`zip` only)                                            |
 

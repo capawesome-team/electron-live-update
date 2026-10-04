@@ -131,6 +131,48 @@ describe('downloadFile', () => {
     });
   });
 
+  it('applies httpTimeout per chunk, not to the total transfer', async () => {
+    const chunkCount = 5;
+    server.route('/bundle.zip', (_request, response) => {
+      response.setHeader('Content-Length', String(chunkCount));
+      let sent = 0;
+      const interval = setInterval(() => {
+        response.write('x');
+        sent += 1;
+        if (sent === chunkCount) {
+          clearInterval(interval);
+          response.end();
+        }
+      }, 100);
+      return null;
+    });
+    const destinationPath = join(workingDirectory, 'bundle.zip');
+    await downloadFile({
+      destinationPath,
+      httpTimeout: 300,
+      url: `${server.origin}/bundle.zip`,
+    });
+    expect(await readFile(destinationPath, 'utf8')).toBe('xxxxx');
+  });
+
+  it('fails with HTTP_TIMEOUT when the body stalls', async () => {
+    server.route('/bundle.zip', (_request, response) => {
+      response.setHeader('Content-Length', '2');
+      response.write('x');
+      return null;
+    });
+    await expect(
+      downloadFile({
+        destinationPath: join(workingDirectory, 'bundle.zip'),
+        httpTimeout: 200,
+        url: `${server.origin}/bundle.zip`,
+      }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.HttpTimeout,
+      message: 'Request timed out.',
+    });
+  });
+
   it('rejects insecure remote URLs', async () => {
     await expect(
       downloadFile({

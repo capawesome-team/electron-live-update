@@ -60,8 +60,8 @@ describe('LiveUpdateEngine', () => {
       logger: silentLogger,
       osVersion: '25.0.0',
       platform: '2',
+      pluginVersion: '0.0.1',
       runtime: 'electron',
-      sdkVersion: '0.0.1',
       serverDomain: server.origin.replace('http://', ''),
       versionCode: '1',
       versionName: '1.0.0',
@@ -147,18 +147,6 @@ describe('LiveUpdateEngine', () => {
           url: `${server.origin}/download/1.0.0.zip`,
         }),
       ).rejects.toMatchObject({ code: ErrorCode.BundleAlreadyExists });
-    });
-
-    it('rejects the manifest artifact type', async () => {
-      const engine = createEngine();
-      await engine.initialize();
-      await expect(
-        engine.downloadBundle({
-          artifactType: 'manifest',
-          bundleId: '1.0.0',
-          url: 'https://example.com/b',
-        }),
-      ).rejects.toMatchObject({ code: ErrorCode.ArtifactTypeNotSupported });
     });
 
     it('rejects a bundle with a checksum mismatch and leaves no traces', async () => {
@@ -392,6 +380,32 @@ describe('LiveUpdateEngine', () => {
       expect((await engine.getNextBundle()).bundleId).toBeNull();
     });
 
+    it('deletes the current bundle and falls back on the next start', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await serveBundleZip('1.1.0');
+      serveLatestBundle('1.1.0');
+      await engine.sync();
+      await engine.applyNextBundle();
+      await engine.deleteBundle({ bundleId: '1.1.0' });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
+      expect((await engine.getNextBundle()).bundleId).toBeNull();
+      const restartedEngine = createEngine();
+      const result = await restartedEngine.initialize();
+      expect(result).toEqual({ currentBundleId: null, rollback: false });
+    });
+
+    it('deleteBundle rejects unknown bundles', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await expect(
+        engine.deleteBundle({ bundleId: 'missing' }),
+      ).rejects.toMatchObject({
+        code: ErrorCode.BundleNotFound,
+        message: 'bundle not found.',
+      });
+    });
+
     it('setNextBundle rejects unknown bundles', async () => {
       const engine = createEngine();
       await engine.initialize();
@@ -446,7 +460,7 @@ describe('LiveUpdateEngine', () => {
       const state = JSON.parse(
         await readFile(join(dataDirectory, 'state.json'), 'utf8'),
       );
-      expect(state.pendingBoot).toEqual({ attempts: 1, bundleId: '1.1.0' });
+      expect(state.pendingBoot).toEqual({ bundleId: '1.1.0' });
       expect(state.currentBundleId).toBe('1.1.0');
     });
 
@@ -573,6 +587,44 @@ describe('LiveUpdateEngine', () => {
       expect(readyResult.rollback).toBe(true);
     });
 
+    it('clears the marker when reloading from an unproven to the default bundle', async () => {
+      const engine = createEngine({
+        readyTimeout: 10000,
+        autoBlockRolledBackBundles: true,
+      });
+      await engine.initialize();
+      await installAndActivate(engine, '1.1.0');
+      await engine.reset();
+      await engine.applyNextBundle();
+      const relaunchedEngine = createEngine({
+        readyTimeout: 10000,
+        autoBlockRolledBackBundles: true,
+      });
+      const result = await relaunchedEngine.initialize();
+      expect(result).toEqual({ currentBundleId: null, rollback: false });
+      expect((await relaunchedEngine.getBlockedBundles()).bundleIds).toEqual(
+        [],
+      );
+    });
+
+    it('the watchdog does not roll back a proven bundle', async () => {
+      const engine = createEngine({
+        readyTimeout: 250,
+        autoBlockRolledBackBundles: true,
+      });
+      await engine.initialize();
+      await installAndActivate(engine, '1.1.0');
+      await engine.ready();
+      const rolledBackEvents: RolledBackEvent[] = [];
+      engine.on('rolledBack', event => rolledBackEvents.push(event));
+      // Reload the proven bundle and never call ready().
+      await engine.applyNextBundle();
+      await new Promise(resolve => setTimeout(resolve, 600));
+      expect(rolledBackEvents).toEqual([]);
+      expect((await engine.getCurrentBundle()).bundleId).toBe('1.1.0');
+      expect((await engine.getBlockedBundles()).bundleIds).toEqual([]);
+    });
+
     it('ready() stops the watchdog', async () => {
       const engine = createEngine({ readyTimeout: 250 });
       await engine.initialize();
@@ -641,6 +693,113 @@ describe('LiveUpdateEngine', () => {
       expect((await relaunchedEngine.getDownloadedBundles()).bundleIds).toEqual(
         [],
       );
+    });
+  });
+
+  describe('app version change', () => {
+    it('resets to the default bundle and keeps downloaded bundles', async () => {
+      const engine = createEngine({ readyTimeout: 10000 });
+      await engine.initialize();
+      await serveBundleZip('1.1.0');
+      serveLatestBundle('1.1.0');
+      await engine.sync();
+      await engine.applyNextBundle();
+      await engine.ready();
+      await engine.setConfig({ appId: 'other-app' });
+      const updatedEngine = createEngine({
+        readyTimeout: 10000,
+        versionCode: '2',
+      });
+      const result = await updatedEngine.initialize();
+      expect(result).toEqual({ currentBundleId: null, rollback: false });
+      expect((await updatedEngine.getNextBundle()).bundleId).toBeNull();
+      expect((await updatedEngine.getConfig()).appId).toBe('app-123');
+      expect((await updatedEngine.getDownloadedBundles()).bundleIds).toEqual([
+        '1.1.0',
+      ]);
+      const state = JSON.parse(
+        await readFile(join(dataDirectory, 'state.json'), 'utf8'),
+      );
+      expect(state.lastSuccessfulBundleId).toBeNull();
+      expect(state.lastVersionCode).toBe('2');
+    });
+
+    it('does not roll back an unproven bundle of the previous app version', async () => {
+      const engine = createEngine({ readyTimeout: 10000 });
+      await engine.initialize();
+      await serveBundleZip('1.1.0');
+      serveLatestBundle('1.1.0');
+      await engine.sync();
+      await engine.applyNextBundle();
+      const updatedEngine = createEngine({
+        readyTimeout: 10000,
+        versionCode: '2',
+      });
+      const result = await updatedEngine.initialize();
+      expect(result).toEqual({ currentBundleId: null, rollback: false });
+    });
+
+    it('keeps the current bundle when the version code is unchanged', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await serveBundleZip('1.1.0');
+      serveLatestBundle('1.1.0');
+      await engine.sync();
+      const restartedEngine = createEngine({ versionName: '1.0.1' });
+      const result = await restartedEngine.initialize();
+      expect(result.currentBundleId).toBe('1.1.0');
+    });
+  });
+
+  describe('runtime configuration', () => {
+    it('returns the configured app id', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      expect(await engine.getConfig()).toEqual({ appId: 'app-123' });
+    });
+
+    it('uses the app id set via setConfig and persists it', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await engine.setConfig({ appId: 'other-app' });
+      expect(await engine.getConfig()).toEqual({ appId: 'other-app' });
+      const restartedEngine = createEngine();
+      await restartedEngine.initialize();
+      expect(await restartedEngine.getConfig()).toEqual({
+        appId: 'other-app',
+      });
+      server.route('/v1/apps/other-app/bundles/latest', {
+        body: 'no',
+        status: 404,
+      });
+      server.route('/v1/apps/other-app/channels', { body: '[]' });
+      await restartedEngine.sync();
+      await restartedEngine.fetchLatestBundle();
+      await restartedEngine.fetchChannels();
+      expect(server.requests.map(request => request.url.pathname)).toEqual([
+        '/v1/apps/other-app/bundles/latest',
+        '/v1/apps/other-app/bundles/latest',
+        '/v1/apps/other-app/channels',
+      ]);
+    });
+
+    it('satisfies the app id requirement via setConfig', async () => {
+      const engine = createEngine({ appId: undefined });
+      await engine.initialize();
+      await engine.setConfig({ appId: 'app-123' });
+      server.route('/v1/apps/app-123/channels', { body: '[]' });
+      expect(await engine.fetchChannels()).toEqual({ channels: [] });
+    });
+
+    it('resets the app id via resetConfig or setConfig with null', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await engine.setConfig({ appId: 'other-app' });
+      await engine.resetConfig();
+      expect(await engine.getConfig()).toEqual({ appId: 'app-123' });
+      await engine.setConfig({ appId: 'other-app' });
+      await engine.setConfig({ appId: null });
+      expect(await engine.getConfig()).toEqual({ appId: 'app-123' });
     });
   });
 
@@ -760,19 +919,6 @@ describe('LiveUpdateEngine', () => {
   });
 
   describe('injectable runtime and pluginVersion', () => {
-    it('defaults pluginVersion to the SDK version', async () => {
-      const engine = createEngine();
-      await engine.initialize();
-      server.route('/v1/apps/app-123/bundles/latest', {
-        body: 'no',
-        status: 404,
-      });
-      await engine.sync();
-      expect(server.requests[0]?.url.searchParams.get('pluginVersion')).toBe(
-        '0.0.1',
-      );
-    });
-
     it('sends the injected pluginVersion and runtime', async () => {
       const engine = createEngine({
         pluginVersion: '8.4.0',

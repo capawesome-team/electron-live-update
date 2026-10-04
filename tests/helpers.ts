@@ -179,25 +179,26 @@ export interface MockServerRoute {
   status?: number;
 }
 
+/**
+ * A dynamic route. Returning `null` leaves the response to the handler
+ * (e.g. to stream it slowly or to never answer for timeout tests).
+ */
+export type MockServerHandler = (
+  request: IncomingMessage,
+  response: ServerResponse,
+) => MockServerRoute | null;
+
 export class MockServer {
   public readonly requests: RecordedRequest[] = [];
   private readonly routes = new Map<
     string,
-    MockServerRoute | ((request: IncomingMessage) => MockServerRoute | null)
+    MockServerRoute | MockServerHandler
   >();
   private server: Server | null = null;
   private readonly sockets = new Set<Socket>();
   private port = 0;
 
-  /**
-   * Register a route. A function route may return `null` to leave the
-   * request unanswered (for timeout tests).
-   */
-  public route(
-    path: string,
-    route:
-      MockServerRoute | ((request: IncomingMessage) => MockServerRoute | null),
-  ): void {
+  public route(path: string, route: MockServerRoute | MockServerHandler): void {
     this.routes.set(path, route);
   }
 
@@ -246,7 +247,8 @@ export class MockServer {
       response.end('Not found');
       return;
     }
-    const resolved = typeof route === 'function' ? route(request) : route;
+    const resolved =
+      typeof route === 'function' ? route(request, response) : route;
     if (resolved === null) {
       return;
     }
