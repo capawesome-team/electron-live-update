@@ -1,6 +1,6 @@
 {
   "name": "@capawesome/electron-live-update",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Electron SDK for over-the-air web bundle updates backed by Capawesome Cloud.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
