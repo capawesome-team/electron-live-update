@@ -19,8 +19,8 @@ describe('CloudApiClient', () => {
     deviceId: 'device-1',
     osVersion: '25.5.0',
     platform: '2',
+    pluginVersion: '0.0.1',
     runtime: 'electron' as string | null,
-    sdkVersion: '0.0.1',
   };
 
   beforeEach(async () => {
@@ -119,16 +119,36 @@ describe('CloudApiClient', () => {
     });
   });
 
-  it('treats unknown artifact types as zip', async () => {
+  it('defaults the artifact type to zip', async () => {
     server.route('/v1/apps/app-123/bundles/latest', {
       body: JSON.stringify({
         bundleId: '1.1.0',
         url: 'https://example.com/b.zip',
-        artifactType: 'something',
       }),
     });
     const response = await client.getLatestBundle(request);
     expect(response?.artifactType).toBe('zip');
+  });
+
+  it('throws ARTIFACT_TYPE_NOT_SUPPORTED for non-zip artifact types', async () => {
+    server.route('/v1/apps/app-123/bundles/latest', {
+      body: JSON.stringify({
+        artifactType: 'manifest',
+        bundleId: '1.1.0',
+        url: 'https://example.com/b',
+      }),
+    });
+    await expect(client.getLatestBundle(request)).rejects.toMatchObject({
+      code: ErrorCode.ArtifactTypeNotSupported,
+    });
+  });
+
+  it('returns null on 400', async () => {
+    server.route('/v1/apps/app-123/bundles/latest', {
+      body: JSON.stringify({ message: 'Invalid app version.' }),
+      status: 400,
+    });
+    expect(await client.getLatestBundle(request)).toBeNull();
   });
 
   it('returns null on 404', async () => {
@@ -147,14 +167,17 @@ describe('CloudApiClient', () => {
     expect(await client.getLatestBundle(request)).toBeNull();
   });
 
-  it('returns null on network errors', async () => {
-    await server.stop();
+  it('throws on network errors', async () => {
     const unreachableClient = new CloudApiClient({
       httpTimeout: 5000,
       serverDomain: '127.0.0.1:1',
     });
-    expect(await unreachableClient.getLatestBundle(request)).toBeNull();
-    await server.start();
+    await expect(
+      unreachableClient.getLatestBundle(request),
+    ).rejects.toMatchObject({
+      code: ErrorCode.Unknown,
+      message: 'An unknown error has occurred.',
+    });
   });
 
   it('throws HTTP_TIMEOUT when the request times out', async () => {
@@ -173,6 +196,81 @@ describe('CloudApiClient', () => {
     server.route('/v1/apps/app-123/bundles/latest', { body: 'not json' });
     await expect(client.getLatestBundle(request)).rejects.toMatchObject({
       code: ErrorCode.Unknown,
+    });
+  });
+
+  describe('getChannels', () => {
+    const channelsRequest = {
+      appId: 'app-123',
+      deviceId: 'device-1',
+      limit: 50,
+      offset: 0,
+      query: null as string | null,
+    };
+
+    it('requests the channels with the exact protocol query parameters', async () => {
+      server.route('/v1/apps/app-123/channels', {
+        body: JSON.stringify([{ id: 'c1', name: 'production' }]),
+      });
+      const channels = await client.getChannels({
+        ...channelsRequest,
+        limit: 10,
+        offset: 5,
+        query: 'prod',
+      });
+      expect(channels).toEqual([{ id: 'c1', name: 'production' }]);
+      const recorded = server.requests[0];
+      expect(recorded?.url.pathname).toBe('/v1/apps/app-123/channels');
+      const params = recorded?.url.searchParams;
+      expect(params?.get('limit')).toBe('10');
+      expect(params?.get('offset')).toBe('5');
+      expect(params?.get('query')).toBe('prod');
+      expect(recorded?.headers['x-capawesome-device-id']).toBe('device-1');
+    });
+
+    it('omits the query parameter when not provided', async () => {
+      server.route('/v1/apps/app-123/channels', { body: '[]' });
+      await client.getChannels(channelsRequest);
+      const params = server.requests[0]?.url.searchParams;
+      expect(params?.has('query')).toBe(false);
+      expect(params?.get('limit')).toBe('50');
+      expect(params?.get('offset')).toBe('0');
+    });
+
+    it('throws CHANNEL_DISCOVERY_NOT_ENABLED on 401', async () => {
+      server.route('/v1/apps/app-123/channels', {
+        body: 'unauthorized',
+        status: 401,
+      });
+      await expect(client.getChannels(channelsRequest)).rejects.toMatchObject({
+        code: ErrorCode.ChannelDiscoveryNotEnabled,
+        message:
+          'Unauthorized. Channel Discovery may not be enabled for this app.',
+      });
+    });
+
+    it('throws on other non-2xx responses', async () => {
+      server.route('/v1/apps/app-123/channels', {
+        body: 'boom',
+        status: 500,
+      });
+      await expect(client.getChannels(channelsRequest)).rejects.toMatchObject({
+        code: ErrorCode.Unknown,
+      });
+    });
+
+    it('ignores malformed channel entries', async () => {
+      server.route('/v1/apps/app-123/channels', {
+        body: JSON.stringify([
+          { id: 'c1', name: 'production' },
+          { id: 'c2' },
+          'garbage',
+          { name: 'no-id' },
+        ]),
+      });
+      expect(await client.getChannels(channelsRequest)).toEqual([
+        { id: 'c1', name: 'production' },
+      ]);
     });
   });
 });

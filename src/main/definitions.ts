@@ -75,7 +75,7 @@ export interface LiveUpdateConfig {
    * The directory where the SDK stores its bundles and state.
    *
    * @since 0.1.0
-   * @default join(app.getPath('userData'), 'live-update')
+   * @default join(app.getPath('userData'), 'capawesome-live-update')
    */
   dataDirectory?: string;
   /**
@@ -124,7 +124,7 @@ export interface LiveUpdateConfig {
   publicKey?: string;
   /**
    * The timeout in milliseconds to wait for the app to be ready
-   * before rolling back to the previous bundle.
+   * before rolling back to the default bundle.
    *
    * It is strongly **recommended** to configure this option (e.g. `10000` ms)
    * so that the SDK can roll back in case of problems: if configured, the
@@ -177,7 +177,7 @@ export interface ServeOptions {
    * updates.
    *
    * @since 0.1.0
-   * @default 'live-update'
+   * @default 'capawesome-live-update'
    */
   scheme?: string;
 }
@@ -190,7 +190,7 @@ export interface ServeOptions {
  *
  * @since 0.1.0
  */
-export interface LiveUpdate extends LiveUpdateApi {
+export interface LiveUpdateHost extends LiveUpdateApi {
   /**
    * Register a window with the SDK.
    *
@@ -217,7 +217,7 @@ export interface LiveUpdate extends LiveUpdateApi {
    * Only available after `serve()` has been called.
    *
    * @since 0.1.0
-   * @example 'live-update://bundle/'
+   * @example 'capawesome-live-update://bundle/'
    */
   getServeUrl(): string;
   /**

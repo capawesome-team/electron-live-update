@@ -3,7 +3,27 @@
  *
  * @since 0.1.0
  */
-export type ArtifactType = 'manifest' | 'zip';
+export type ArtifactType = 'zip';
+
+/**
+ * A channel that bundles can be delivered on.
+ *
+ * @since 0.1.0
+ */
+export interface Channel {
+  /**
+   * The unique identifier of the channel.
+   *
+   * @since 0.1.0
+   */
+  id: string;
+  /**
+   * The name of the channel.
+   *
+   * @since 0.1.0
+   */
+  name: string;
+}
 
 /**
  * @since 0.1.0
@@ -24,9 +44,6 @@ export interface DeleteBundleOptions {
 export interface DownloadBundleOptions {
   /**
    * The artifact type of the bundle.
-   *
-   * **Attention**: The `manifest` artifact type is not yet supported
-   * by this SDK.
    *
    * @since 0.1.0
    * @default 'zip'
@@ -74,6 +91,44 @@ export interface DownloadBundleOptions {
    * @example 'https://example.com/bundle.zip'
    */
   url: string;
+}
+
+/**
+ * @since 0.1.0
+ */
+export interface FetchChannelsOptions {
+  /**
+   * The maximum number of channels to return.
+   *
+   * @since 0.1.0
+   * @default 50
+   */
+  limit?: number;
+  /**
+   * The number of channels to skip.
+   *
+   * @since 0.1.0
+   * @default 0
+   */
+  offset?: number;
+  /**
+   * The query to filter channels by name.
+   *
+   * @since 0.1.0
+   */
+  query?: string;
+}
+
+/**
+ * @since 0.1.0
+ */
+export interface FetchChannelsResult {
+  /**
+   * The list of channels.
+   *
+   * @since 0.1.0
+   */
+  channels: Channel[];
 }
 
 /**
@@ -179,6 +234,21 @@ export interface GetChannelResult {
    * @example 'production'
    */
   channel: string | null;
+}
+
+/**
+ * @since 0.1.0
+ */
+export interface GetConfigResult {
+  /**
+   * The app ID used to identify the app.
+   *
+   * If `null`, no app ID is configured.
+   *
+   * @since 0.1.0
+   * @example '6e351b4f-69a7-415e-a057-4567df7ffe94'
+   */
+  appId: string | null;
 }
 
 /**
@@ -311,7 +381,7 @@ export interface ReadyResult {
    */
   previousBundleId: string | null;
   /**
-   * Whether or not the app was reset to a previous bundle.
+   * Whether or not the app was reset to the default bundle.
    *
    * @since 0.1.0
    */
@@ -330,6 +400,21 @@ export interface SetChannelOptions {
    * @since 0.1.0
    */
   channel: string | null;
+}
+
+/**
+ * @since 0.1.0
+ */
+export interface SetConfigOptions {
+  /**
+   * The app ID used to identify the app.
+   *
+   * Set `null` to reset to the configured value.
+   *
+   * @since 0.1.0
+   * @example '6e351b4f-69a7-415e-a057-4567df7ffe94'
+   */
+  appId?: string | null;
 }
 
 /**
@@ -441,7 +526,7 @@ export interface NextBundleSetEvent {
 }
 
 /**
- * Event that is emitted when the engine reverted to a previous bundle
+ * Event that is emitted when the engine reverted to the default bundle
  * because the app did not signal readiness in time.
  *
  * @since 0.1.0
@@ -501,7 +586,7 @@ export type NextBundleSetListener = (event: NextBundleSetEvent) => void;
 export type ReloadedListener = () => void;
 
 /**
- * Listener for when the engine reverted to a previous bundle.
+ * Listener for when the engine reverted to the default bundle.
  *
  * @since 0.1.0
  */
@@ -539,6 +624,16 @@ export interface LiveUpdateApi {
    * @since 0.1.0
    */
   downloadBundle(options: DownloadBundleOptions): Promise<void>;
+  /**
+   * Fetch the available channels using the [Capawesome Cloud](https://capawesome.io/cloud/).
+   *
+   * **Attention**: This method only works for apps with public channels
+   * enabled (Channel Discovery). Private channels can still be selected
+   * with `setChannel(...)`.
+   *
+   * @since 0.1.0
+   */
+  fetchChannels(options?: FetchChannelsOptions): Promise<FetchChannelsResult>;
   /**
    * Fetch the latest bundle using the [Capawesome Cloud](https://capawesome.io/cloud/).
    *
@@ -617,7 +712,7 @@ export interface LiveUpdateApi {
    * Notify the SDK that the app is ready to use and no rollback is needed.
    *
    * **Attention**: This method should be called as soon as the app is ready to use
-   * to prevent the app from being reset to a previous bundle.
+   * to prevent the app from being reset to the default bundle.
    *
    * @since 0.1.0
    */
@@ -697,6 +792,16 @@ export interface LiveUpdateApi {
   addListener(
     eventName: 'reloaded',
     listener: ReloadedListener,
+  ): ListenerHandle;
+  /**
+   * Listen for when the engine reverted to the default bundle because
+   * the app did not signal readiness in time.
+   *
+   * @since 0.1.0
+   */
+  addListener(
+    eventName: 'rolledBack',
+    listener: RolledBackListener,
   ): ListenerHandle;
   /**
    * Remove all listeners of this instance.

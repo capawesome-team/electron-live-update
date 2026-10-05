@@ -1,8 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ErrorCode, LiveUpdateError } from './errors';
+import { renameWithRetry } from './fs-retry';
+
+/**
+ * Options for the recursive `rm` calls: on Windows, deleting a
+ * directory fails with EPERM/EBUSY while another process (e.g. an
+ * antivirus scanner) holds a handle on a file inside it. `rm` retries
+ * these errors natively with a linear backoff.
+ */
+const RM_RETRY_OPTIONS = {
+  force: true,
+  maxRetries: 5,
+  recursive: true,
+} as const;
 
 /**
  * The bundle identifier value that is reserved for the built-in bundle.
@@ -61,7 +74,7 @@ export class BundleStore {
   public async initialize(): Promise<void> {
     await mkdir(this.bundlesDirectory, { recursive: true });
     // Leftover staging data from a previous crashed run is garbage.
-    await rm(this.stagingDirectory, { recursive: true, force: true });
+    await rm(this.stagingDirectory, RM_RETRY_OPTIONS);
     await mkdir(this.stagingDirectory, { recursive: true });
   }
 
@@ -112,17 +125,20 @@ export class BundleStore {
         'bundle already exists.',
       );
     }
-    await rename(sourceDirectory, this.getPath(bundleId));
+    // Retried: on Windows the rename fails with EPERM/EACCES while an
+    // antivirus scanner holds a freshly written file in the staging
+    // directory.
+    await renameWithRetry(sourceDirectory, this.getPath(bundleId));
   }
 
   public async delete(bundleId: string): Promise<void> {
     if (!(await this.has(bundleId))) {
       throw new LiveUpdateError(ErrorCode.BundleNotFound, 'bundle not found.');
     }
-    await rm(this.getPath(bundleId), { recursive: true, force: true });
+    await rm(this.getPath(bundleId), RM_RETRY_OPTIONS);
   }
 
   public async cleanUpStaging(directory: string): Promise<void> {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, RM_RETRY_OPTIONS);
   }
 }

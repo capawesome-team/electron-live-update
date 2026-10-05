@@ -101,6 +101,22 @@ describe('downloadFile', () => {
     expect(result.signature).toBe('ZmFrZQ==');
   });
 
+  it('preserves present-but-empty verification headers as empty strings', async () => {
+    server.route('/bundle.zip', {
+      body: 'data',
+      headers: { 'X-Checksum': '', 'X-Signature': '' },
+    });
+    const result = await downloadFile({
+      destinationPath: join(workingDirectory, 'bundle.zip'),
+      httpTimeout: 5000,
+      url: `${server.origin}/bundle.zip`,
+    });
+    // An empty header must not be collapsed to undefined: a present-but-
+    // empty value flows into verification and rejects there.
+    expect(result.checksum).toBe('');
+    expect(result.signature).toBe('');
+  });
+
   it('fails with DOWNLOAD_FAILED on a non-2xx response', async () => {
     server.route('/bundle.zip', { body: 'gone', status: 404 });
     await expect(
@@ -112,6 +128,48 @@ describe('downloadFile', () => {
     ).rejects.toMatchObject({
       code: ErrorCode.DownloadFailed,
       message: 'Bundle could not be downloaded.',
+    });
+  });
+
+  it('applies httpTimeout per chunk, not to the total transfer', async () => {
+    const chunkCount = 5;
+    server.route('/bundle.zip', (_request, response) => {
+      response.setHeader('Content-Length', String(chunkCount));
+      let sent = 0;
+      const interval = setInterval(() => {
+        response.write('x');
+        sent += 1;
+        if (sent === chunkCount) {
+          clearInterval(interval);
+          response.end();
+        }
+      }, 100);
+      return null;
+    });
+    const destinationPath = join(workingDirectory, 'bundle.zip');
+    await downloadFile({
+      destinationPath,
+      httpTimeout: 300,
+      url: `${server.origin}/bundle.zip`,
+    });
+    expect(await readFile(destinationPath, 'utf8')).toBe('xxxxx');
+  });
+
+  it('fails with HTTP_TIMEOUT when the body stalls', async () => {
+    server.route('/bundle.zip', (_request, response) => {
+      response.setHeader('Content-Length', '2');
+      response.write('x');
+      return null;
+    });
+    await expect(
+      downloadFile({
+        destinationPath: join(workingDirectory, 'bundle.zip'),
+        httpTimeout: 200,
+        url: `${server.origin}/bundle.zip`,
+      }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.HttpTimeout,
+      message: 'Request timed out.',
     });
   });
 

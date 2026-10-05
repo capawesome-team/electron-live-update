@@ -7,10 +7,10 @@ This SDK speaks the same protocol and the same vocabulary as the [`@capawesome/c
 ## Features
 
 - ⚡ **OTA updates**: Ship changes to your app's web bundle instantly via [Capawesome Cloud](https://capawesome.io/cloud/) or any self-hosted server speaking the same protocol.
-- 🛟 **Kill-safe rollback**: A pending-boot marker and boot counter are persisted to disk _before_ a new bundle loads. If the app crashes, hangs or is killed during boot — even by a power loss — the next start automatically reverts to the last bundle that worked and optionally blocks the broken one.
+- 🛟 **Kill-safe rollback**: A pending-boot marker is persisted to disk _before_ a new bundle loads. If the app crashes, hangs or is killed during boot — even by a power loss — the next start automatically reverts to the default bundle and optionally blocks the broken one.
 - 🔒 **Signature verification**: RSA signature verification of every downloaded bundle (`publicKey`), plus checksum re-verification of the installed bundle at activation time — tampering after download is detected too.
 - 🌐 **Stable origin serving**: A privileged custom scheme serves the active bundle under a constant origin, so `localStorage`, IndexedDB and service workers survive bundle switches. A simple path-based mode is available as an alternative.
-- 🚦 **Channels**: Deliver different bundles to different user groups (production, beta, staged rollouts).
+- 🚦 **Channels**: Deliver different bundles to different user groups (production, beta, staged rollouts), and discover them at runtime with `fetchChannels()`.
 - 📂 **Multiple bundles**: Download, manage and switch between bundles programmatically.
 - 🔁 **Background updates**: Optional automatic sync at app start, on focus and on resume.
 - 🔐 **Secure by default**: HTTPS-only downloads (localhost exempt for development), zip-slip protection, atomic bundle installation.
@@ -90,7 +90,7 @@ That's it. The renderer code is line-for-line the same vocabulary you would use 
 
 ### Custom scheme (recommended): `serve()`
 
-`serve()` registers a privileged custom scheme (default: `live-update`) and serves the files of the active bundle under the stable origin `live-update://bundle`. Because the origin never changes:
+`serve()` registers a privileged custom scheme (default: `capawesome-live-update`) and serves the files of the active bundle under the stable origin `capawesome-live-update://bundle`. Because the origin never changes:
 
 - `localStorage`, IndexedDB, and other origin-scoped storage **survive bundle switches**,
 - `fetch()` and service workers work as on a regular secure origin,
@@ -100,7 +100,7 @@ That's it. The renderer code is line-for-line the same vocabulary you would use 
 
 ```ts
 liveUpdate.serve(); // or liveUpdate.serve({ scheme: 'my-app' })
-await window.loadURL(liveUpdate.getServeUrl()); // 'live-update://bundle/'
+await window.loadURL(liveUpdate.getServeUrl()); // 'capawesome-live-update://bundle/'
 ```
 
 ### Simple mode: `getCurrentBundlePath()`
@@ -120,9 +120,9 @@ In both modes, `reload()` applies the next bundle and reloads all attached windo
 
 A live update SDK must never leave users stuck with a broken update. This SDK persists its rollback state machine to disk:
 
-1. When a new (not yet proven) bundle is about to load, a **pending-boot marker** is written to the state file — _before_ the bundle gets to run.
-2. Your app calls `ready()` once it is up and running. This clears the marker and records the bundle as the last successful one.
-3. If `ready()` is not called within `readyTimeout` milliseconds, the SDK rolls back to the last successful bundle (or the default bundle) and reloads.
+1. When a live update bundle is about to load, a **pending-boot marker** is written to the state file — _before_ the bundle gets to run.
+2. Your app calls `ready()` once it is up and running. This clears the marker.
+3. If `ready()` is not called within `readyTimeout` milliseconds, the SDK rolls back to the default bundle and reloads.
 4. If the process dies before either happens — crash, force quit, power loss — the uncleared marker is detected **on the next start** and the rollback happens then. No timer needs to survive; the state is on disk.
 
 With `autoBlockRolledBackBundles: true`, a bundle that caused a rollback is also blocked from being installed again by future `sync()` calls (up to 100 bundles; the oldest entry is unblocked when the limit is reached).
@@ -193,7 +193,7 @@ const engine = new LiveUpdateEngine({
   osVersion: '...',
   versionCode: '1',
   versionName: '1.0.0',
-  sdkVersion: '0.1.0',
+  pluginVersion: '0.1.0',
   readyTimeout: 10000,
 });
 const { currentBundleId } = await engine.initialize(); // BEFORE loading web content
@@ -204,19 +204,19 @@ const { currentBundleId } = await engine.initialize(); // BEFORE loading web con
 
 The API mirrors [`@capawesome/capacitor-live-update`](https://capawesome.io/plugins/live-update/). Differences that exist are deliberate and listed here:
 
-| Aspect                           | Capacitor plugin                        | This SDK                                                                  |
-| -------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
-| `readyTimeout` default           | `0` (disabled)                          | `0` (disabled) — same default, same recommendation to set `10000`         |
-| Rollback target                  | Default bundle                          | **Last successful bundle**, then default — desktop has no store reinstall |
-| Kill-safe boot rollback          | —                                       | Pending-boot marker on disk, checked at every process start               |
-| Activation-time verification     | —                                       | Installed bundles re-verified against install-time checksums              |
-| Rollback blocking                | On `ready()`                            | At rollback time (survives a kill before `ready()`)                       |
-| Configuration                    | Capacitor config file                   | `createLiveUpdate()` options                                              |
-| `versionCode` / `versionName`    | Native app version                      | `app.getVersion()` unless configured                                      |
-| Device ID                        | Random UUID (Android) / vendor ID (iOS) | Random UUID, persisted per app ID                                         |
-| Serving                          | Capacitor WebView                       | `serve()` custom scheme or `getCurrentBundlePath()`                       |
-| `fetchChannels()`, `setConfig()` | Available                               | Not yet available                                                         |
-| `manifest` artifact type         | Available (delta updates)               | Not yet available (`zip` only)                                            |
+| Aspect                        | Capacitor plugin                        | This SDK                                                          |
+| ----------------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| `readyTimeout` default        | `0` (disabled)                          | `0` (disabled) — same default, same recommendation to set `10000` |
+| Kill-safe boot rollback       | —                                       | Pending-boot marker on disk, checked at every process start       |
+| Activation-time verification  | —                                       | Installed bundles re-verified against install-time checksums      |
+| Rollback blocking             | On `ready()`                            | At rollback time (survives a kill before `ready()`)               |
+| Configuration                 | Capacitor config file                   | `createLiveUpdate()` options                                      |
+| `versionCode` / `versionName` | Native app version                      | `app.getVersion()` unless configured                              |
+| Device ID                     | Random UUID (Android) / vendor ID (iOS) | Random UUID, persisted per app ID                                 |
+| Serving                       | Capacitor WebView                       | `serve()` custom scheme or `getCurrentBundlePath()`               |
+| `setConfig()`                 | Available                               | Engine only (`LiveUpdateEngine`)                                  |
+| `fetchChannels()`             | Available                               | **Available**                                                     |
+| `manifest` artifact type      | Available (delta updates)               | Not yet available (`zip` only)                                    |
 
 ## API
 
@@ -226,28 +226,28 @@ Creates the SDK. Call once, early in your main process (before `app.whenReady()`
 
 #### Configuration
 
-| Option                       | Type                     | Default                                        | Description                                                                                   |
-| ---------------------------- | ------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `appId`                      | `string`                 | –                                              | Capawesome Cloud app ID. Required for `sync()`/`fetchLatestBundle()`.                         |
-| `autoBlockRolledBackBundles` | `boolean`                | `false`                                        | Block bundles that caused a rollback. No effect if `readyTimeout` is `0`.                     |
-| `autoDeleteBundles`          | `boolean`                | `false`                                        | Delete unused bundles after `ready()`.                                                        |
-| `autoUpdateStrategy`         | `'none' \| 'background'` | `'none'`                                       | `background`: sync automatically at start, on focus and on resume (at most every 15 minutes). |
-| `dataDirectory`              | `string`                 | `join(app.getPath('userData'), 'live-update')` | Where bundles and state are stored.                                                           |
-| `defaultChannel`             | `string`                 | –                                              | Default update channel.                                                                       |
-| `defaultBundlePath`          | `string`                 | –                                              | Directory of the packaged web assets. Required for `serve()`.                                 |
-| `httpTimeout`                | `number`                 | `60000`                                        | HTTP timeout in milliseconds.                                                                 |
-| `logger`                     | `LiveUpdateLogger`       | `console`                                      | Custom logger.                                                                                |
-| `publicKey`                  | `string`                 | –                                              | PEM-encoded RSA public key for signature verification.                                        |
-| `readyTimeout`               | `number`                 | `0`                                            | Rollback protection timeout in milliseconds. `0` disables it. Recommended: `10000`.           |
-| `serverDomain`               | `string`                 | `'api.cloud.capawesome.io'`                    | API domain, without scheme or path. Localhost domains use plain HTTP for development.         |
-| `versionCode`                | `string`                 | `app.getVersion()`                             | Version code reported to the update server.                                                   |
-| `versionName`                | `string`                 | `app.getVersion()`                             | Version name reported to the update server.                                                   |
+| Option                       | Type                     | Default                                                   | Description                                                                                   |
+| ---------------------------- | ------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `appId`                      | `string`                 | –                                                         | Capawesome Cloud app ID. Required for `sync()`/`fetchLatestBundle()`.                         |
+| `autoBlockRolledBackBundles` | `boolean`                | `false`                                                   | Block bundles that caused a rollback. No effect if `readyTimeout` is `0`.                     |
+| `autoDeleteBundles`          | `boolean`                | `false`                                                   | Delete unused bundles after `ready()`.                                                        |
+| `autoUpdateStrategy`         | `'none' \| 'background'` | `'none'`                                                  | `background`: sync automatically at start, on focus and on resume (at most every 15 minutes). |
+| `dataDirectory`              | `string`                 | `join(app.getPath('userData'), 'capawesome-live-update')` | Where bundles and state are stored.                                                           |
+| `defaultChannel`             | `string`                 | –                                                         | Default update channel.                                                                       |
+| `defaultBundlePath`          | `string`                 | –                                                         | Directory of the packaged web assets. Required for `serve()`.                                 |
+| `httpTimeout`                | `number`                 | `60000`                                                   | HTTP timeout in milliseconds.                                                                 |
+| `logger`                     | `LiveUpdateLogger`       | `console`                                                 | Custom logger.                                                                                |
+| `publicKey`                  | `string`                 | –                                                         | PEM-encoded RSA public key for signature verification.                                        |
+| `readyTimeout`               | `number`                 | `0`                                                       | Rollback protection timeout in milliseconds. `0` disables it. Recommended: `10000`.           |
+| `serverDomain`               | `string`                 | `'api.cloud.capawesome.io'`                               | API domain, without scheme or path. Localhost domains use plain HTTP for development.         |
+| `versionCode`                | `string`                 | `app.getVersion()`                                        | Version code reported to the update server.                                                   |
+| `versionName`                | `string`                 | `app.getVersion()`                                        | Version name reported to the update server.                                                   |
 
 #### Methods
 
-The returned `LiveUpdate` object implements the shared vocabulary — the same methods you know from the Capacitor plugin:
+The returned `LiveUpdateHost` object implements the shared vocabulary — the same methods you know from the Capacitor plugin:
 
-`clearBlockedBundles()`, `deleteBundle(options)`, `downloadBundle(options)`, `fetchLatestBundle(options?)`, `getBlockedBundles()`, `getChannel()`, `getCurrentBundle()`, `getCustomId()`, `getDeviceId()`, `getDownloadedBundles()`, `getNextBundle()`, `getVersionCode()`, `getVersionName()`, `isSyncing()`, `ready()`, `reload()`, `reset()`, `setChannel(options)`, `setCustomId(options)`, `setNextBundle(options)`, `sync(options?)`, `addListener(eventName, listener)`, `removeAllListeners()`
+`clearBlockedBundles()`, `deleteBundle(options)`, `downloadBundle(options)`, `fetchChannels(options?)`, `fetchLatestBundle(options?)`, `getBlockedBundles()`, `getChannel()`, `getCurrentBundle()`, `getCustomId()`, `getDeviceId()`, `getDownloadedBundles()`, `getNextBundle()`, `getVersionCode()`, `getVersionName()`, `isSyncing()`, `ready()`, `reload()`, `reset()`, `setChannel(options)`, `setCustomId(options)`, `setNextBundle(options)`, `sync(options?)`, `addListener(eventName, listener)`, `removeAllListeners()`
 
 plus the Electron-specific serving integration:
 
@@ -260,11 +260,12 @@ All options and results use the exact same shapes as the Capacitor plugin (`Sync
 
 #### Events
 
-| Event                    | Payload                                               | Emitted when                        |
-| ------------------------ | ----------------------------------------------------- | ----------------------------------- |
-| `downloadBundleProgress` | `{ bundleId, downloadedBytes, progress, totalBytes }` | A bundle download makes progress    |
-| `nextBundleSet`          | `{ bundleId }`                                        | A bundle is set as the next bundle  |
-| `reloaded`               | –                                                     | The app was reloaded via `reload()` |
+| Event                    | Payload                                               | Emitted when                                                                                |
+| ------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `downloadBundleProgress` | `{ bundleId, downloadedBytes, progress, totalBytes }` | A bundle download makes progress                                                            |
+| `nextBundleSet`          | `{ bundleId }`                                        | A bundle is set as the next bundle                                                          |
+| `reloaded`               | –                                                     | The app was reloaded via `reload()`                                                         |
+| `rolledBack`             | `{ currentBundleId, previousBundleId }`               | The app was rolled back to the default bundle after a boot did not signal readiness in time |
 
 Events are available in the main process (`liveUpdate.addListener(...)`) and forwarded to attached renderers (`LiveUpdate.addListener(...)`).
 

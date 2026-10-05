@@ -15,6 +15,7 @@ export const IPC_METHODS = [
   'clearBlockedBundles',
   'deleteBundle',
   'downloadBundle',
+  'fetchChannels',
   'fetchLatestBundle',
   'getBlockedBundles',
   'getChannel',
@@ -44,6 +45,7 @@ export const IPC_EVENTS = [
   'downloadBundleProgress',
   'nextBundleSet',
   'reloaded',
+  'rolledBack',
 ] as const;
 
 export type IpcEvent = (typeof IPC_EVENTS)[number];

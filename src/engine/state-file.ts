@@ -1,5 +1,7 @@
-import { open, mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { open, mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+
+import { renameWithRetry, retryOnFileLock } from './fs-retry';
 
 /**
  * Metadata stored for each downloaded bundle.
@@ -17,16 +19,10 @@ export interface BundleMetadata {
    * @since 0.1.0
    */
   fileChecksums: { [path: string]: string };
-  /**
-   * Whether the download of this bundle was verified with a signature.
-   *
-   * @since 0.1.0
-   */
-  signed: boolean;
 }
 
 /**
- * The marker that is written to disk BEFORE a not-yet-proven bundle
+ * The marker that is written to disk BEFORE a live update bundle
  * is loaded. It is cleared by `ready()`. If it is still present at
  * the next process start, the previous boot died before the app
  * became ready and the engine rolls back.
@@ -34,12 +30,6 @@ export interface BundleMetadata {
  * @since 0.1.0
  */
 export interface PendingBootMarker {
-  /**
-   * The number of boot attempts for this bundle.
-   *
-   * @since 0.1.0
-   */
-  attempts: number;
   /**
    * The unique identifier of the bundle being booted.
    *
@@ -49,13 +39,20 @@ export interface PendingBootMarker {
 }
 
 export interface PersistedState {
+  /**
+   * The app ID set via `setConfig()`. Overrides the configured app ID.
+   */
+  appIdOverride: string | null;
   blockedBundleIds: string[];
   bundles: { [bundleId: string]: BundleMetadata };
   channel: string | null;
   currentBundleId: string | null;
   customId: string | null;
   deviceIds: { [appId: string]: string };
-  lastSuccessfulBundleId: string | null;
+  /**
+   * The app version code of the last start, used to detect app updates.
+   */
+  lastVersionCode: string | null;
   nextBundleId: string | null;
   pendingBoot: PendingBootMarker | null;
   previousBundleId: string | null;
@@ -65,13 +62,14 @@ const STATE_FILE_NAME = 'state.json';
 
 function createDefaultState(): PersistedState {
   return {
+    appIdOverride: null,
     blockedBundleIds: [],
     bundles: {},
     channel: null,
     currentBundleId: null,
     customId: null,
     deviceIds: {},
-    lastSuccessfulBundleId: null,
+    lastVersionCode: null,
     nextBundleId: null,
     pendingBoot: null,
     previousBundleId: null,
@@ -84,6 +82,9 @@ function normalizeState(raw: unknown): PersistedState {
     return state;
   }
   const record = raw as Record<string, unknown>;
+  if (typeof record.appIdOverride === 'string') {
+    state.appIdOverride = record.appIdOverride;
+  }
   if (Array.isArray(record.blockedBundleIds)) {
     state.blockedBundleIds = record.blockedBundleIds.filter(
       (value): value is string => typeof value === 'string',
@@ -108,10 +109,7 @@ function normalizeState(raw: unknown): PersistedState {
             }
           }
         }
-        state.bundles[bundleId] = {
-          fileChecksums,
-          signed: metadataRecord.signed === true,
-        };
+        state.bundles[bundleId] = { fileChecksums };
       }
     }
   }
@@ -133,8 +131,8 @@ function normalizeState(raw: unknown): PersistedState {
       }
     }
   }
-  if (typeof record.lastSuccessfulBundleId === 'string') {
-    state.lastSuccessfulBundleId = record.lastSuccessfulBundleId;
+  if (typeof record.lastVersionCode === 'string') {
+    state.lastVersionCode = record.lastVersionCode;
   }
   if (typeof record.nextBundleId === 'string') {
     state.nextBundleId = record.nextBundleId;
@@ -142,14 +140,7 @@ function normalizeState(raw: unknown): PersistedState {
   if (typeof record.pendingBoot === 'object' && record.pendingBoot !== null) {
     const marker = record.pendingBoot as Record<string, unknown>;
     if (typeof marker.bundleId === 'string') {
-      state.pendingBoot = {
-        attempts:
-          typeof marker.attempts === 'number' &&
-          Number.isFinite(marker.attempts)
-            ? marker.attempts
-            : 1,
-        bundleId: marker.bundleId,
-      };
+      state.pendingBoot = { bundleId: marker.bundleId };
     }
   }
   if (typeof record.previousBundleId === 'string') {
@@ -199,7 +190,11 @@ export class StateFile {
   public async update(mutate: (state: PersistedState) => void): Promise<void> {
     mutate(this.state);
     const snapshot = JSON.stringify(this.state, null, 2);
-    this.writeQueue = this.writeQueue.then(() => this.write(snapshot));
+    // A failed write rejects THIS update, but must not poison the
+    // queue: later updates write the then-latest snapshot regardless.
+    this.writeQueue = this.writeQueue
+      .catch(() => undefined)
+      .then(() => this.write(snapshot));
     return this.writeQueue;
   }
 
@@ -213,7 +208,9 @@ export class StateFile {
     } finally {
       await fileHandle.close();
     }
-    await rename(temporaryPath, this.filePath);
+    // Retried: on Windows the rename fails with EPERM while any other
+    // process (antivirus, an external reader) holds the destination.
+    await renameWithRetry(temporaryPath, this.filePath);
     try {
       // Flush the rename itself. Not supported on all platforms
       // (e.g. directories cannot be opened on Windows), so best effort.
@@ -229,7 +226,9 @@ export class StateFile {
   }
 
   public async delete(): Promise<void> {
-    await rm(this.filePath, { force: true });
+    // Retried for the same reason as the rename in write(): deleting
+    // an externally held file fails with EPERM/EBUSY on Windows.
+    await retryOnFileLock(() => rm(this.filePath, { force: true }));
     this.state = createDefaultState();
   }
 }

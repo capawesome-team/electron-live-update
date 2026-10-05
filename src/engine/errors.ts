@@ -50,6 +50,15 @@ export enum ErrorCode {
    */
   BundleNotFound = 'BUNDLE_NOT_FOUND',
   /**
+   * Channel Discovery is not enabled for this app.
+   *
+   * Enable public channels in the Capawesome Cloud Console to use
+   * `fetchChannels()`.
+   *
+   * @since 0.1.0
+   */
+  ChannelDiscoveryNotEnabled = 'CHANNEL_DISCOVERY_NOT_ENABLED',
+  /**
    * The checksum of the bundle could not be calculated.
    *
    * @since 0.1.0

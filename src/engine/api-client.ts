@@ -1,5 +1,5 @@
 import type { ArtifactType } from './definitions';
-import { isTimeoutError } from './download';
+import { isLocalhost, isTimeoutError } from './download';
 import { ErrorCode, LiveUpdateError } from './errors';
 
 /**
@@ -15,7 +15,7 @@ export interface GetLatestBundleResponse {
   url: string;
 }
 
-export interface FetchLatestBundleRequest {
+export interface GetLatestBundleRequest {
   appId: string;
   appVersionCode: string;
   appVersionName: string;
@@ -25,8 +25,24 @@ export interface FetchLatestBundleRequest {
   deviceId: string;
   osVersion: string;
   platform: string;
+  pluginVersion: string;
   runtime: string | null;
-  sdkVersion: string;
+}
+
+export interface GetChannelsRequest {
+  appId: string;
+  deviceId: string;
+  limit: number;
+  offset: number;
+  query: string | null;
+}
+
+/**
+ * A single channel returned by the Capawesome Cloud channels endpoint.
+ */
+export interface GetChannelsResponseItem {
+  id: string;
+  name: string;
 }
 
 export interface CloudApiClientOptions {
@@ -60,23 +76,18 @@ export class CloudApiClient {
     } catch {
       hostname = serverDomain;
     }
-    const isLocalhost =
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '[::1]' ||
-      hostname.endsWith('.localhost');
-    return `${isLocalhost ? 'http' : 'https'}://${serverDomain}`;
+    return `${isLocalhost(hostname) ? 'http' : 'https'}://${serverDomain}`;
   }
 
   /**
    * Fetch the latest bundle for the app.
    *
-   * Returns `null` if no bundle is available. Any non-2xx response is
-   * treated as "no bundle available", matching the plugin behavior.
-   * Timeouts are surfaced as errors.
+   * Returns `null` if no bundle is available. Like the Android plugin,
+   * any non-2xx response is treated as "no bundle available", while
+   * timeouts and network errors are surfaced as errors.
    */
   public async getLatestBundle(
-    request: FetchLatestBundleRequest,
+    request: GetLatestBundleRequest,
   ): Promise<GetLatestBundleResponse | null> {
     const url = new URL(
       `${this.getBaseUrl()}/v1/apps/${encodeURIComponent(request.appId)}/bundles/latest`,
@@ -89,36 +100,72 @@ export class CloudApiClient {
     this.appendQueryParameter(url, 'deviceId', request.deviceId);
     this.appendQueryParameter(url, 'osVersion', request.osVersion);
     this.appendQueryParameter(url, 'platform', request.platform);
-    this.appendQueryParameter(url, 'pluginVersion', request.sdkVersion);
+    this.appendQueryParameter(url, 'pluginVersion', request.pluginVersion);
     this.appendQueryParameter(url, 'runtime', request.runtime);
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          'X-Capawesome-Device-Id': request.deviceId,
-        },
-        signal: AbortSignal.timeout(this.options.httpTimeout),
-      });
-    } catch (error) {
-      if (isTimeoutError(error)) {
-        throw new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
-      }
-      // Network errors mean no update is available right now.
-      return null;
-    }
+    const response = await this.request(url, request.deviceId);
     if (!response.ok) {
       return null;
     }
-    let json: unknown;
-    try {
-      json = await response.json();
-    } catch {
+    return this.parseLatestBundleResponse(response.json);
+  }
+
+  /**
+   * Fetch the available channels for the app.
+   *
+   * Throws `ChannelDiscoveryNotEnabled` on HTTP 401 (public channels
+   * not enabled), mirroring the `@capawesome/capacitor-live-update`
+   * plugin behavior.
+   */
+  public async getChannels(
+    request: GetChannelsRequest,
+  ): Promise<GetChannelsResponseItem[]> {
+    const url = new URL(
+      `${this.getBaseUrl()}/v1/apps/${encodeURIComponent(request.appId)}/channels`,
+    );
+    this.appendQueryParameter(url, 'limit', String(request.limit));
+    this.appendQueryParameter(url, 'offset', String(request.offset));
+    this.appendQueryParameter(url, 'query', request.query);
+    const response = await this.request(url, request.deviceId);
+    if (response.status === 401) {
+      throw new LiveUpdateError(
+        ErrorCode.ChannelDiscoveryNotEnabled,
+        'Unauthorized. Channel Discovery may not be enabled for this app.',
+      );
+    }
+    if (!response.ok) {
       throw new LiveUpdateError(
         ErrorCode.Unknown,
         'An unknown error has occurred.',
       );
     }
-    return this.parseLatestBundleResponse(json);
+    return this.parseChannelsResponse(response.json);
+  }
+
+  /**
+   * Send a GET request. The JSON body is only parsed for 2xx responses.
+   */
+  private async request(
+    url: URL,
+    deviceId: string,
+  ): Promise<{ json: unknown; ok: boolean; status: number }> {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'X-Capawesome-Device-Id': deviceId,
+        },
+        signal: AbortSignal.timeout(this.options.httpTimeout),
+      });
+      const json: unknown = response.ok ? await response.json() : null;
+      return { json, ok: response.ok, status: response.status };
+    } catch (error) {
+      if (isTimeoutError(error)) {
+        throw new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
+      }
+      throw new LiveUpdateError(
+        ErrorCode.Unknown,
+        'An unknown error has occurred.',
+      );
+    }
   }
 
   private appendQueryParameter(
@@ -129,6 +176,23 @@ export class CloudApiClient {
     if (value !== null && value !== undefined) {
       url.searchParams.append(name, value);
     }
+  }
+
+  private parseChannelsResponse(json: unknown): GetChannelsResponseItem[] {
+    if (!Array.isArray(json)) {
+      return [];
+    }
+    const channels: GetChannelsResponseItem[] = [];
+    for (const entry of json) {
+      if (typeof entry !== 'object' || entry === null) {
+        continue;
+      }
+      const record = entry as Record<string, unknown>;
+      if (typeof record.id === 'string' && typeof record.name === 'string') {
+        channels.push({ id: record.id, name: record.name });
+      }
+    }
+    return channels;
   }
 
   private parseLatestBundleResponse(
@@ -154,8 +218,17 @@ export class CloudApiClient {
         }
       }
     }
+    if (
+      typeof record.artifactType === 'string' &&
+      record.artifactType !== 'zip'
+    ) {
+      throw new LiveUpdateError(
+        ErrorCode.ArtifactTypeNotSupported,
+        'The artifact type is not supported by this SDK.',
+      );
+    }
     return {
-      artifactType: record.artifactType === 'manifest' ? 'manifest' : 'zip',
+      artifactType: 'zip',
       bundleId: record.bundleId,
       channelName:
         typeof record.channelName === 'string' ? record.channelName : undefined,

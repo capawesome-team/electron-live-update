@@ -3,6 +3,8 @@
  *
  * Speaks the Live Update protocol:
  * - GET  /v1/apps/{appId}/bundles/latest  -> latest bundle JSON or 404
+ * - GET  /v1/apps/{appId}/channels        -> list of channels (or 401 when
+ *                                            CHANNELS_DISABLED is set)
  * - GET  /download/{file}                 -> zip bytes with X-Checksum
  *                                            and X-Signature headers
  * - POST /__control                       -> {"latest": "<bundleId>" | null}
@@ -24,6 +26,18 @@ const bundles = JSON.parse(
 );
 let latestBundleId = process.env.LATEST ?? null;
 
+const channels = [
+  { id: 'a1b2c3d4-0000-0000-0000-000000000001', name: 'production' },
+  { id: 'a1b2c3d4-0000-0000-0000-000000000002', name: 'beta' },
+  { id: 'a1b2c3d4-0000-0000-0000-000000000003', name: 'canary' },
+];
+
+function sendJson(response, status, payload) {
+  response.statusCode = status;
+  response.setHeader('Content-Type', 'application/json');
+  response.end(JSON.stringify(payload));
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', `http://localhost:${port}`);
   console.log(`[mock-server] ${request.method} ${url.pathname}${url.search}`);
@@ -38,23 +52,42 @@ const server = createServer(async (request, response) => {
   }
   if (
     request.method === 'GET' &&
+    /^\/v1\/apps\/[^/]+\/channels$/.test(url.pathname)
+  ) {
+    if (process.env.CHANNELS_DISABLED) {
+      response.statusCode = 401;
+      response.end(
+        JSON.stringify({
+          message:
+            'Unauthorized. Channel Discovery may not be enabled for this app.',
+        }),
+      );
+      return;
+    }
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    const offset = Number(url.searchParams.get('offset') ?? 0);
+    const query = url.searchParams.get('query');
+    const filtered = channels.filter(channel =>
+      query ? channel.name.includes(query) : true,
+    );
+    sendJson(response, 200, filtered.slice(offset, offset + limit));
+    return;
+  }
+  if (
+    request.method === 'GET' &&
     /^\/v1\/apps\/[^/]+\/bundles\/latest$/.test(url.pathname)
   ) {
     const bundle =
       latestBundleId === null ? undefined : bundles[latestBundleId];
     if (!bundle) {
-      response.statusCode = 404;
-      response.end(JSON.stringify({ message: 'No bundle available.' }));
+      sendJson(response, 404, { message: 'No bundle available.' });
       return;
     }
-    response.setHeader('Content-Type', 'application/json');
-    response.end(
-      JSON.stringify({
-        artifactType: 'zip',
-        bundleId: latestBundleId,
-        url: `http://localhost:${port}/download/${bundle.file}`,
-      }),
-    );
+    sendJson(response, 200, {
+      artifactType: 'zip',
+      bundleId: latestBundleId,
+      url: `http://localhost:${port}/download/${bundle.file}`,
+    });
     return;
   }
   if (request.method === 'GET' && url.pathname.startsWith('/download/')) {
