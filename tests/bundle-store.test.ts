@@ -85,6 +85,12 @@ describe('BundleStore', () => {
     });
   });
 
+  it('rejects paths for invalid bundle identifiers', () => {
+    expect(() => store.getPath('../outside')).toThrowError(
+      expect.objectContaining({ code: ErrorCode.BundleIdInvalid }),
+    );
+  });
+
   it('clears leftover staging directories on initialize', async () => {
     const staging = await store.createStagingDirectory();
     await writeFile(join(staging, 'leftover.zip'), 'data');

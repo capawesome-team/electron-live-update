@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -443,6 +443,49 @@ describe('LiveUpdateEngine', () => {
       ).rejects.toMatchObject({
         code: ErrorCode.BundleNotFound,
         message: 'bundle not found.',
+      });
+    });
+
+    describe('with an invalid bundle identifier', () => {
+      const invalidBundleIds = ['..', '../outside', 'a/b', 'a\\b'];
+      let outsideDirectory: string;
+
+      beforeEach(async () => {
+        outsideDirectory = join(dataDirectory, 'outside');
+        await mkdir(outsideDirectory);
+        await writeFile(join(outsideDirectory, 'keep.txt'), 'keep');
+      });
+
+      it('deleteBundle rejects it and keeps directories outside the bundle store', async () => {
+        const engine = createEngine();
+        await engine.initialize();
+        for (const bundleId of invalidBundleIds) {
+          await expect(engine.deleteBundle({ bundleId })).rejects.toMatchObject(
+            { code: ErrorCode.BundleIdInvalid },
+          );
+        }
+        expect(await readdir(outsideDirectory)).toEqual(['keep.txt']);
+      });
+
+      it('setNextBundle rejects it', async () => {
+        const engine = createEngine();
+        await engine.initialize();
+        for (const bundleId of invalidBundleIds) {
+          await expect(
+            engine.setNextBundle({ bundleId }),
+          ).rejects.toMatchObject({ code: ErrorCode.BundleIdInvalid });
+        }
+        expect((await engine.getNextBundle()).bundleId).toBeNull();
+      });
+
+      it('sync rejects it', async () => {
+        const engine = createEngine();
+        await engine.initialize();
+        serveLatestBundle('../outside');
+        await expect(engine.sync()).rejects.toMatchObject({
+          code: ErrorCode.BundleIdInvalid,
+        });
+        expect((await engine.getNextBundle()).bundleId).toBeNull();
       });
     });
 

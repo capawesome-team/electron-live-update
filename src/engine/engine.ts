@@ -512,6 +512,7 @@ export class LiveUpdateEngine {
         return { nextBundleId: null };
       }
       const bundleId = latest.bundleId;
+      assertValidBundleId(bundleId);
       const state = this.stateFile.get();
       if (state.blockedBundleIds.includes(bundleId)) {
         this.logger.info(
@@ -623,12 +624,7 @@ export class LiveUpdateEngine {
    */
   public async deleteBundle(options: DeleteBundleOptions): Promise<void> {
     this.assertInitialized();
-    if (!options.bundleId) {
-      throw new LiveUpdateError(
-        ErrorCode.BundleIdMissing,
-        'bundleId must be provided.',
-      );
-    }
+    assertValidBundleId(options.bundleId);
     await this.store.delete(options.bundleId);
     await this.stateFile.update(s => {
       delete s.bundles[options.bundleId];
@@ -649,12 +645,7 @@ export class LiveUpdateEngine {
       await this.setNextBundleInternal(null);
       return;
     }
-    if (!options.bundleId) {
-      throw new LiveUpdateError(
-        ErrorCode.BundleIdMissing,
-        'bundleId must be provided.',
-      );
-    }
+    assertValidBundleId(options.bundleId);
     if (!(await this.store.has(options.bundleId))) {
       throw new LiveUpdateError(ErrorCode.BundleNotFound, 'bundle not found.');
     }
