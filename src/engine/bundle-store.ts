@@ -89,6 +89,7 @@ export class BundleStore {
   }
 
   public getPath(bundleId: string): string {
+    assertValidBundleId(bundleId);
     return join(this.bundlesDirectory, bundleId);
   }
 
