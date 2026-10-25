@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/capawesome-team/electron-live-update/compare/v0.1.0...v0.1.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* validate the bundle identifier in deleteBundle, setNextBundle and sync ([#3](https://github.com/capawesome-team/electron-live-update/issues/3)) ([0ea6c53](https://github.com/capawesome-team/electron-live-update/commit/0ea6c539e188f8c7c09fcc239bd1b8f88c2ab30b))
+
 ## [0.1.0](https://github.com/capawesome-team/electron-live-update/compare/v0.0.1...v0.1.0) (2026-10-05)
 
 
