@@ -146,7 +146,7 @@ export interface LiveUpdateConfig {
    *
    * @since 0.1.0
    * @default 'api.cloud.capawesome.io'
-   * @example 'api.cloud.capawesome.eu'
+   * @example 'api.example.com'
    */
   serverDomain?: string;
   /**
