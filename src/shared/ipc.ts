@@ -3,6 +3,8 @@
  * script and the renderer client.
  */
 
+import type { ErrorCode } from '../engine/errors';
+
 export const IPC_GLOBAL_KEY = 'CapawesomeLiveUpdate';
 
 const IPC_NAMESPACE = 'capawesome-live-update';
@@ -64,7 +66,7 @@ export function getEventChannel(event: IpcEvent): string {
  */
 export type IpcResult =
   | { ok: true; value: unknown }
-  | { error: { code: string; message: string }; ok: false };
+  | { error: { code?: ErrorCode; message: string }; ok: false };
 
 /**
  * The shape of the bridge object that the preload script exposes on

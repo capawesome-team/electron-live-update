@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { ErrorCode, LiveUpdateError } from './errors';
+import { LiveUpdateError } from './errors';
 
 /**
  * Compute the SHA-256 checksum of a file as a lowercase hex string.
@@ -17,10 +17,7 @@ export async function calculateFileChecksum(filePath: string): Promise<string> {
     }
     return hash.digest('hex');
   } catch {
-    throw new LiveUpdateError(
-      ErrorCode.ChecksumCalculationFailed,
-      'Failed to calculate checksum.',
-    );
+    throw new LiveUpdateError('Failed to calculate checksum.');
   }
 }
 
@@ -32,10 +29,7 @@ export function parsePublicKey(publicKeyPem: string): KeyObject {
     }
     return key;
   } catch {
-    throw new LiveUpdateError(
-      ErrorCode.PublicKeyInvalid,
-      'Invalid public key.',
-    );
+    throw new LiveUpdateError('Invalid public key.');
   }
 }
 
@@ -63,10 +57,7 @@ export async function verifyFileSignature(
     valid = false;
   }
   if (!valid) {
-    throw new LiveUpdateError(
-      ErrorCode.SignatureVerificationFailed,
-      'Signature verification failed.',
-    );
+    throw new LiveUpdateError('Signature verification failed.');
   }
 }
 
@@ -106,10 +97,7 @@ export async function verifyDownloadedFile(
   if (options.publicKey) {
     const publicKey = parsePublicKey(options.publicKey);
     if (options.signature === undefined) {
-      throw new LiveUpdateError(
-        ErrorCode.SignatureMissing,
-        'Bundle does not contain a signature.',
-      );
+      throw new LiveUpdateError('Bundle does not contain a signature.');
     }
     await verifyFileSignature(options.filePath, options.signature, publicKey);
     return;
@@ -118,10 +106,7 @@ export async function verifyDownloadedFile(
   if (expectedChecksum !== undefined) {
     const actualChecksum = await calculateFileChecksum(options.filePath);
     if (actualChecksum !== expectedChecksum) {
-      throw new LiveUpdateError(
-        ErrorCode.ChecksumMismatch,
-        'Checksum mismatch.',
-      );
+      throw new LiveUpdateError('Checksum mismatch.');
     }
   }
 }

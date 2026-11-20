@@ -181,7 +181,7 @@ This package is one npm package with subpath exports. The `./engine` entry point
 
 ### Engine API stability
 
-The engine's public surface (`LiveUpdateEngine`, `LiveUpdateEngineConfig`, the vocabulary types, and `ErrorCode`) is a **stable API**: the future Capacitor Electron adapter depends on it. Hosts inject everything platform-specific:
+The engine's public surface (`LiveUpdateEngine`, `LiveUpdateEngineConfig`, the vocabulary types, and `ErrorCode`) is what the Electron platform of `@capawesome/capacitor-live-update` builds on. Hosts inject everything platform-specific:
 
 ```ts
 import { LiveUpdateEngine } from '@capawesome/electron-live-update/engine';
@@ -271,7 +271,7 @@ Events are available in the main process (`liveUpdate.addListener(...)`) and for
 
 #### Errors
 
-All errors are `LiveUpdateError` instances with a `code` from the `ErrorCode` enum (for example `ErrorCode.ChecksumMismatch`, `ErrorCode.SignatureVerificationFailed`, `ErrorCode.SyncInProgress`). The codes survive the IPC boundary, so renderer code can handle them reliably:
+Only an error that an app can handle in code has a `code`: `BUNDLE_ALREADY_EXISTS`, `BUNDLE_NOT_FOUND`, `REQUEST_FAILED` and `SYNC_IN_PROGRESS`. Every other error has a message only, and its `code` is `undefined`.
 
 ```ts
 import {
@@ -284,9 +284,9 @@ try {
 } catch (error) {
   if (
     error instanceof LiveUpdateError &&
-    error.code === ErrorCode.SyncInProgress
+    error.code === ErrorCode.RequestFailed
   ) {
-    // ...
+    // Try again later.
   }
 }
 ```

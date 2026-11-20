@@ -130,7 +130,7 @@ describe('CloudApiClient', () => {
     expect(response?.artifactType).toBe('zip');
   });
 
-  it('throws ARTIFACT_TYPE_NOT_SUPPORTED for non-zip artifact types', async () => {
+  it('throws for non-zip artifact types', async () => {
     server.route('/v1/apps/app-123/bundles/latest', {
       body: JSON.stringify({
         artifactType: 'manifest',
@@ -139,7 +139,7 @@ describe('CloudApiClient', () => {
       }),
     });
     await expect(client.getLatestBundle(request)).rejects.toMatchObject({
-      code: ErrorCode.ArtifactTypeNotSupported,
+      message: 'The artifact type is not supported by this SDK.',
     });
   });
 
@@ -167,27 +167,30 @@ describe('CloudApiClient', () => {
     expect(await client.getLatestBundle(request)).toBeNull();
   });
 
-  it('throws on network errors', async () => {
+  it('throws REQUEST_FAILED with the reason on network errors', async () => {
+    const stoppedServer = new MockServer();
+    await stoppedServer.start();
+    await stoppedServer.stop();
     const unreachableClient = new CloudApiClient({
       httpTimeout: 5000,
-      serverDomain: '127.0.0.1:1',
+      serverDomain: stoppedServer.origin.replace('http://', ''),
     });
     await expect(
       unreachableClient.getLatestBundle(request),
     ).rejects.toMatchObject({
-      code: ErrorCode.Unknown,
-      message: 'An unknown error has occurred.',
+      code: ErrorCode.RequestFailed,
+      message: expect.stringContaining('ECONNREFUSED'),
     });
   });
 
-  it('throws HTTP_TIMEOUT when the request times out', async () => {
+  it('throws REQUEST_FAILED when the request times out', async () => {
     server.route('/v1/apps/app-123/bundles/latest', () => null);
     const slowClient = new CloudApiClient({
       httpTimeout: 200,
       serverDomain: server.origin.replace('http://', ''),
     });
     await expect(slowClient.getLatestBundle(request)).rejects.toMatchObject({
-      code: ErrorCode.HttpTimeout,
+      code: ErrorCode.RequestFailed,
       message: 'Request timed out.',
     });
   });
@@ -195,7 +198,8 @@ describe('CloudApiClient', () => {
   it('throws on a malformed JSON body', async () => {
     server.route('/v1/apps/app-123/bundles/latest', { body: 'not json' });
     await expect(client.getLatestBundle(request)).rejects.toMatchObject({
-      code: ErrorCode.Unknown,
+      code: undefined,
+      message: 'An unknown error has occurred.',
     });
   });
 
@@ -237,25 +241,26 @@ describe('CloudApiClient', () => {
       expect(params?.get('offset')).toBe('0');
     });
 
-    it('throws CHANNEL_DISCOVERY_NOT_ENABLED on 401', async () => {
+    it('throws without a code on 401', async () => {
       server.route('/v1/apps/app-123/channels', {
         body: 'unauthorized',
         status: 401,
       });
       await expect(client.getChannels(channelsRequest)).rejects.toMatchObject({
-        code: ErrorCode.ChannelDiscoveryNotEnabled,
+        code: undefined,
         message:
           'Unauthorized. Channel Discovery may not be enabled for this app.',
       });
     });
 
-    it('throws on other non-2xx responses', async () => {
+    it('throws REQUEST_FAILED on other non-2xx responses', async () => {
       server.route('/v1/apps/app-123/channels', {
         body: 'boom',
         status: 500,
       });
       await expect(client.getChannels(channelsRequest)).rejects.toMatchObject({
-        code: ErrorCode.Unknown,
+        code: ErrorCode.RequestFailed,
+        message: 'Request failed with status code 500.',
       });
     });
 

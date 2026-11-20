@@ -1,6 +1,6 @@
 import type { ArtifactType } from './definitions';
-import { isLocalhost, isTimeoutError } from './download';
-import { ErrorCode, LiveUpdateError } from './errors';
+import { isLocalhost } from './download';
+import { ErrorCode, LiveUpdateError, toRequestError } from './errors';
 
 /**
  * Response of the Capawesome Cloud latest-bundle endpoint.
@@ -112,8 +112,8 @@ export class CloudApiClient {
   /**
    * Fetch the available channels for the app.
    *
-   * Throws `ChannelDiscoveryNotEnabled` on HTTP 401 (public channels
-   * not enabled), mirroring the `@capawesome/capacitor-live-update`
+   * Throws an error without a code on HTTP 401 (public channels not
+   * enabled), mirroring the `@capawesome/capacitor-live-update`
    * plugin behavior.
    */
   public async getChannels(
@@ -128,14 +128,13 @@ export class CloudApiClient {
     const response = await this.request(url, request.deviceId);
     if (response.status === 401) {
       throw new LiveUpdateError(
-        ErrorCode.ChannelDiscoveryNotEnabled,
         'Unauthorized. Channel Discovery may not be enabled for this app.',
       );
     }
     if (!response.ok) {
       throw new LiveUpdateError(
-        ErrorCode.Unknown,
-        'An unknown error has occurred.',
+        `Request failed with status code ${response.status}.`,
+        ErrorCode.RequestFailed,
       );
     }
     return this.parseChannelsResponse(response.json);
@@ -158,13 +157,11 @@ export class CloudApiClient {
       const json: unknown = response.ok ? await response.json() : null;
       return { json, ok: response.ok, status: response.status };
     } catch (error) {
-      if (isTimeoutError(error)) {
-        throw new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
+      if (error instanceof SyntaxError) {
+        // The server sent an invalid body.
+        throw new LiveUpdateError('An unknown error has occurred.');
       }
-      throw new LiveUpdateError(
-        ErrorCode.Unknown,
-        'An unknown error has occurred.',
-      );
+      throw toRequestError(error);
     }
   }
 
@@ -223,7 +220,6 @@ export class CloudApiClient {
       record.artifactType !== 'zip'
     ) {
       throw new LiveUpdateError(
-        ErrorCode.ArtifactTypeNotSupported,
         'The artifact type is not supported by this SDK.',
       );
     }

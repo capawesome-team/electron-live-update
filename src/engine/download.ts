@@ -2,7 +2,7 @@ import { createWriteStream } from 'node:fs';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { ErrorCode, LiveUpdateError } from './errors';
+import { ErrorCode, LiveUpdateError, toRequestError } from './errors';
 
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -24,7 +24,7 @@ export function assertSecureUrl(url: string): URL {
   try {
     parsed = new URL(url);
   } catch {
-    throw new LiveUpdateError(ErrorCode.UrlMissing, 'url must be provided.');
+    throw new LiveUpdateError('url must be provided.');
   }
   if (parsed.protocol === 'https:') {
     return parsed;
@@ -33,7 +33,6 @@ export function assertSecureUrl(url: string): URL {
     return parsed;
   }
   throw new LiveUpdateError(
-    ErrorCode.InsecureUrl,
     'Bundles must be downloaded via HTTPS. Plain HTTP is only allowed for localhost.',
   );
 }
@@ -89,8 +88,8 @@ export async function downloadFile(
     }
     if (!response.ok || !response.body) {
       throw new LiveUpdateError(
-        ErrorCode.DownloadFailed,
         'Bundle could not be downloaded.',
+        ErrorCode.RequestFailed,
       );
     }
     const totalBytes = Number(response.headers.get('content-length')) || 0;
@@ -130,29 +129,4 @@ export async function downloadFile(
   } finally {
     clearTimeout(idleTimer);
   }
-}
-
-export function toRequestError(error: unknown): LiveUpdateError {
-  if (error instanceof LiveUpdateError) {
-    return error;
-  }
-  if (isTimeoutError(error)) {
-    return new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
-  }
-  return new LiveUpdateError(
-    ErrorCode.DownloadFailed,
-    'Bundle could not be downloaded.',
-  );
-}
-
-export function isTimeoutError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const name = (error as { name?: string }).name;
-  if (name === 'TimeoutError' || name === 'AbortError') {
-    return true;
-  }
-  const cause = (error as { cause?: unknown }).cause;
-  return cause !== undefined && cause !== error && isTimeoutError(cause);
 }

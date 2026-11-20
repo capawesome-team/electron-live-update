@@ -159,7 +159,7 @@ describe('LiveUpdateEngine', () => {
           checksum: 'f'.repeat(64),
           url: `${server.origin}/download/1.0.0.zip`,
         }),
-      ).rejects.toMatchObject({ code: ErrorCode.ChecksumMismatch });
+      ).rejects.toMatchObject({ message: 'Checksum mismatch.' });
       expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
     });
 
@@ -176,7 +176,6 @@ describe('LiveUpdateEngine', () => {
           url: `${server.origin}/download/bad.zip`,
         }),
       ).rejects.toMatchObject({
-        code: ErrorCode.BundleIndexHtmlMissing,
         message: 'The bundle does not contain an index.html file.',
       });
       expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
@@ -215,7 +214,7 @@ describe('LiveUpdateEngine', () => {
           bundleId: 'tampered',
           url: `${server.origin}/download/tampered.zip`,
         }),
-      ).rejects.toMatchObject({ code: ErrorCode.SignatureVerificationFailed });
+      ).rejects.toMatchObject({ message: 'Signature verification failed.' });
       expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
     });
 
@@ -229,7 +228,9 @@ describe('LiveUpdateEngine', () => {
           bundleId: 'unsigned',
           url: `${server.origin}/download/unsigned.zip`,
         }),
-      ).rejects.toMatchObject({ code: ErrorCode.SignatureMissing });
+      ).rejects.toMatchObject({
+        message: 'Bundle does not contain a signature.',
+      });
     });
   });
 
@@ -309,7 +310,6 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine({ appId: undefined });
       await engine.initialize();
       await expect(engine.sync()).rejects.toMatchObject({
-        code: ErrorCode.AppIdMissing,
         message: 'appId must be configured.',
       });
     });
@@ -472,7 +472,7 @@ describe('LiveUpdateEngine', () => {
         await engine.initialize();
         for (const bundleId of invalidBundleIds) {
           await expect(engine.deleteBundle({ bundleId })).rejects.toMatchObject(
-            { code: ErrorCode.BundleIdInvalid },
+            { message: 'The bundle identifier contains invalid characters.' },
           );
         }
         expect(await readdir(outsideDirectory)).toEqual(['keep.txt']);
@@ -484,7 +484,9 @@ describe('LiveUpdateEngine', () => {
         for (const bundleId of invalidBundleIds) {
           await expect(
             engine.setNextBundle({ bundleId }),
-          ).rejects.toMatchObject({ code: ErrorCode.BundleIdInvalid });
+          ).rejects.toMatchObject({
+            message: 'The bundle identifier contains invalid characters.',
+          });
         }
         expect((await engine.getNextBundle()).bundleId).toBeNull();
       });
@@ -494,7 +496,7 @@ describe('LiveUpdateEngine', () => {
         await engine.initialize();
         serveLatestBundle('../outside');
         await expect(engine.sync()).rejects.toMatchObject({
-          code: ErrorCode.BundleIdInvalid,
+          message: 'The bundle identifier contains invalid characters.',
         });
         expect((await engine.getNextBundle()).bundleId).toBeNull();
       });
@@ -753,7 +755,7 @@ describe('LiveUpdateEngine', () => {
         'evil();',
       );
       await expect(engine.applyNextBundle()).rejects.toMatchObject({
-        code: ErrorCode.ChecksumMismatch,
+        message: 'Checksum mismatch.',
       });
       expect((await engine.getCurrentBundle()).bundleId).toBeNull();
       // The tampered bundle was discarded.
@@ -977,7 +979,7 @@ describe('LiveUpdateEngine', () => {
       expect(params?.get('query')).toBe('prod');
     });
 
-    it('throws CHANNEL_DISCOVERY_NOT_ENABLED on 401', async () => {
+    it('throws on 401', async () => {
       const engine = createEngine();
       await engine.initialize();
       server.route('/v1/apps/app-123/channels', {
@@ -985,7 +987,6 @@ describe('LiveUpdateEngine', () => {
         status: 401,
       });
       await expect(engine.fetchChannels()).rejects.toMatchObject({
-        code: ErrorCode.ChannelDiscoveryNotEnabled,
         message:
           'Unauthorized. Channel Discovery may not be enabled for this app.',
       });
@@ -995,7 +996,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine({ appId: undefined });
       await engine.initialize();
       await expect(engine.fetchChannels()).rejects.toMatchObject({
-        code: ErrorCode.AppIdMissing,
+        message: 'appId must be configured.',
       });
     });
   });
@@ -1022,13 +1023,14 @@ describe('LiveUpdateEngine', () => {
     it('throws when used before initialize()', async () => {
       const engine = createEngine();
       await expect(engine.getCurrentBundle()).rejects.toMatchObject({
-        code: ErrorCode.NotInitialized,
+        message:
+          'The engine has not been initialized. Call initialize() first.',
       });
     });
 
     it('fails fast on an invalid public key', () => {
       expect(() => createEngine({ publicKey: 'garbage' })).toThrowError(
-        expect.objectContaining({ code: ErrorCode.PublicKeyInvalid }),
+        expect.objectContaining({ message: 'Invalid public key.' }),
       );
     });
 

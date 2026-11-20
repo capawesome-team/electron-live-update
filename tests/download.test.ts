@@ -32,22 +32,22 @@ describe('assertSecureUrl', () => {
 
   it('rejects http URLs for remote hosts', () => {
     expect(() => assertSecureUrl('http://example.com/bundle.zip')).toThrowError(
-      expect.objectContaining({ code: ErrorCode.InsecureUrl }),
+      'Bundles must be downloaded via HTTPS.',
     );
   });
 
   it('rejects other protocols', () => {
     expect(() => assertSecureUrl('file:///etc/passwd')).toThrowError(
-      expect.objectContaining({ code: ErrorCode.InsecureUrl }),
+      'Bundles must be downloaded via HTTPS.',
     );
     expect(() => assertSecureUrl('ftp://example.com/bundle.zip')).toThrowError(
-      expect.objectContaining({ code: ErrorCode.InsecureUrl }),
+      'Bundles must be downloaded via HTTPS.',
     );
   });
 
   it('rejects invalid URLs', () => {
     expect(() => assertSecureUrl('not a url')).toThrowError(
-      expect.objectContaining({ code: ErrorCode.UrlMissing }),
+      'url must be provided.',
     );
   });
 });
@@ -117,7 +117,7 @@ describe('downloadFile', () => {
     expect(result.signature).toBe('');
   });
 
-  it('fails with DOWNLOAD_FAILED on a non-2xx response', async () => {
+  it('fails with REQUEST_FAILED on a non-2xx response', async () => {
     server.route('/bundle.zip', { body: 'gone', status: 404 });
     await expect(
       downloadFile({
@@ -126,8 +126,24 @@ describe('downloadFile', () => {
         url: `${server.origin}/bundle.zip`,
       }),
     ).rejects.toMatchObject({
-      code: ErrorCode.DownloadFailed,
+      code: ErrorCode.RequestFailed,
       message: 'Bundle could not be downloaded.',
+    });
+  });
+
+  it('fails with REQUEST_FAILED when the host cannot be reached', async () => {
+    const stoppedServer = new MockServer();
+    await stoppedServer.start();
+    await stoppedServer.stop();
+    await expect(
+      downloadFile({
+        destinationPath: join(workingDirectory, 'bundle.zip'),
+        httpTimeout: 5000,
+        url: `${stoppedServer.origin}/bundle.zip`,
+      }),
+    ).rejects.toMatchObject({
+      code: ErrorCode.RequestFailed,
+      message: expect.stringContaining('ECONNREFUSED'),
     });
   });
 
@@ -155,7 +171,7 @@ describe('downloadFile', () => {
     expect(await readFile(destinationPath, 'utf8')).toBe('xxxxx');
   });
 
-  it('fails with HTTP_TIMEOUT when the body stalls', async () => {
+  it('fails with REQUEST_FAILED when the body stalls', async () => {
     server.route('/bundle.zip', (_request, response) => {
       response.setHeader('Content-Length', '2');
       response.write('x');
@@ -168,7 +184,7 @@ describe('downloadFile', () => {
         url: `${server.origin}/bundle.zip`,
       }),
     ).rejects.toMatchObject({
-      code: ErrorCode.HttpTimeout,
+      code: ErrorCode.RequestFailed,
       message: 'Request timed out.',
     });
   });
@@ -180,6 +196,6 @@ describe('downloadFile', () => {
         httpTimeout: 5000,
         url: 'http://example.com/bundle.zip',
       }),
-    ).rejects.toMatchObject({ code: ErrorCode.InsecureUrl });
+    ).rejects.toThrowError('Bundles must be downloaded via HTTPS.');
   });
 });
