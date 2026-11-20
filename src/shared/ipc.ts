@@ -64,7 +64,7 @@ export function getEventChannel(event: IpcEvent): string {
  */
 export type IpcResult =
   | { ok: true; value: unknown }
-  | { error: { code: string; message: string }; ok: false };
+  | { error: { code?: string; message: string }; ok: false };
 
 /**
  * The shape of the bridge object that the preload script exposes on

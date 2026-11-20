@@ -4,7 +4,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import * as yauzl from 'yauzl';
 
-import { ErrorCode, LiveUpdateError } from './errors';
+import { LiveUpdateError } from './errors';
 
 const SYMLINK_MODE = 0xa000;
 
@@ -14,28 +14,19 @@ const SYMLINK_MODE = 0xa000;
  */
 function toSafeSegments(entryFileName: string): string[] {
   if (entryFileName.includes('\0')) {
-    throw new LiveUpdateError(
-      ErrorCode.DownloadFailed,
-      'Bundle could not be downloaded.',
-    );
+    throw new LiveUpdateError('Bundle could not be downloaded.');
   }
   // Zip entries use forward slashes, but be lenient with archives
   // created by tools that emit backslashes.
   const normalized = entryFileName.replace(/\\/g, '/');
   if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) {
-    throw new LiveUpdateError(
-      ErrorCode.DownloadFailed,
-      'Bundle could not be downloaded.',
-    );
+    throw new LiveUpdateError('Bundle could not be downloaded.');
   }
   const segments = normalized
     .split('/')
     .filter(segment => segment.length > 0 && segment !== '.');
   if (segments.some(segment => segment === '..')) {
-    throw new LiveUpdateError(
-      ErrorCode.DownloadFailed,
-      'Bundle could not be downloaded.',
-    );
+    throw new LiveUpdateError('Bundle could not be downloaded.');
   }
   return segments;
 }
@@ -60,12 +51,7 @@ export async function extractZip(
     (resolvePromise, rejectPromise) => {
       yauzl.open(zipFilePath, { lazyEntries: true }, (error, file) => {
         if (error) {
-          rejectPromise(
-            new LiveUpdateError(
-              ErrorCode.DownloadFailed,
-              'Bundle could not be downloaded.',
-            ),
-          );
+          rejectPromise(new LiveUpdateError('Bundle could not be downloaded.'));
         } else {
           resolvePromise(file);
         }
@@ -79,10 +65,7 @@ export async function extractZip(
       rejectPromise(
         error instanceof LiveUpdateError
           ? error
-          : new LiveUpdateError(
-              ErrorCode.DownloadFailed,
-              'Bundle could not be downloaded.',
-            ),
+          : new LiveUpdateError('Bundle could not be downloaded.'),
       );
     };
     zipFile.on('error', fail);
@@ -100,10 +83,7 @@ export async function extractZip(
           entryPath !== targetRoot &&
           !entryPath.startsWith(targetRoot + sep)
         ) {
-          throw new LiveUpdateError(
-            ErrorCode.DownloadFailed,
-            'Bundle could not be downloaded.',
-          );
+          throw new LiveUpdateError('Bundle could not be downloaded.');
         }
         if (entry.fileName.endsWith('/')) {
           await mkdir(entryPath, { recursive: true });

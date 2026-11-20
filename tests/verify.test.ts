@@ -3,7 +3,6 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ErrorCode } from '../src/engine/errors';
 import {
   calculateContentChecksums,
   calculateFileChecksum,
@@ -60,7 +59,6 @@ describe('verification', () => {
     await expect(
       verifyDownloadedFile({ filePath, checksum: 'a'.repeat(64) }),
     ).rejects.toMatchObject({
-      code: ErrorCode.ChecksumMismatch,
       message: 'Checksum mismatch.',
     });
   });
@@ -73,7 +71,6 @@ describe('verification', () => {
     await expect(
       verifyDownloadedFile({ filePath, checksum: '' }),
     ).rejects.toMatchObject({
-      code: ErrorCode.ChecksumMismatch,
       message: 'Checksum mismatch.',
     });
   });
@@ -93,7 +90,6 @@ describe('verification', () => {
     await expect(
       verifyDownloadedFile({ filePath, publicKey: publicKeyPem, signature }),
     ).rejects.toMatchObject({
-      code: ErrorCode.SignatureVerificationFailed,
       message: 'Signature verification failed.',
     });
   });
@@ -105,7 +101,7 @@ describe('verification', () => {
     await expect(
       verifyDownloadedFile({ filePath, publicKey: publicKeyPem, signature }),
     ).rejects.toMatchObject({
-      code: ErrorCode.SignatureVerificationFailed,
+      message: 'Signature verification failed.',
     });
   });
 
@@ -115,7 +111,6 @@ describe('verification', () => {
     await expect(
       verifyDownloadedFile({ filePath, publicKey: publicKeyPem, checksum }),
     ).rejects.toMatchObject({
-      code: ErrorCode.SignatureMissing,
       message: 'Bundle does not contain a signature.',
     });
   });
@@ -129,7 +124,6 @@ describe('verification', () => {
         signature: '',
       }),
     ).rejects.toMatchObject({
-      code: ErrorCode.SignatureVerificationFailed,
       message: 'Signature verification failed.',
     });
   });
@@ -151,7 +145,6 @@ describe('verification', () => {
   it('rejects an invalid public key', () => {
     expect(() => parsePublicKey('not a key')).toThrowError(
       expect.objectContaining({
-        code: ErrorCode.PublicKeyInvalid,
         message: 'Invalid public key.',
       }),
     );

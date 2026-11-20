@@ -24,7 +24,7 @@ export function assertSecureUrl(url: string): URL {
   try {
     parsed = new URL(url);
   } catch {
-    throw new LiveUpdateError(ErrorCode.UrlMissing, 'url must be provided.');
+    throw new LiveUpdateError('url must be provided.');
   }
   if (parsed.protocol === 'https:') {
     return parsed;
@@ -33,7 +33,6 @@ export function assertSecureUrl(url: string): URL {
     return parsed;
   }
   throw new LiveUpdateError(
-    ErrorCode.InsecureUrl,
     'Bundles must be downloaded via HTTPS. Plain HTTP is only allowed for localhost.',
   );
 }
@@ -89,8 +88,8 @@ export async function downloadFile(
     }
     if (!response.ok || !response.body) {
       throw new LiveUpdateError(
-        ErrorCode.DownloadFailed,
         'Bundle could not be downloaded.',
+        ErrorCode.RequestFailed,
       );
     }
     const totalBytes = Number(response.headers.get('content-length')) || 0;
@@ -137,11 +136,11 @@ export function toRequestError(error: unknown): LiveUpdateError {
     return error;
   }
   if (isTimeoutError(error)) {
-    return new LiveUpdateError(ErrorCode.HttpTimeout, 'Request timed out.');
+    return new LiveUpdateError('Request timed out.', ErrorCode.RequestFailed);
   }
   return new LiveUpdateError(
-    ErrorCode.DownloadFailed,
     'Bundle could not be downloaded.',
+    ErrorCode.RequestFailed,
   );
 }
 

@@ -92,6 +92,9 @@ describe('extractZip', () => {
     await expect(extractZip(zipPath, targetDirectory)).rejects.toBeInstanceOf(
       LiveUpdateError,
     );
+    await expect(extractZip(zipPath, targetDirectory)).rejects.toMatchObject({
+      code: undefined,
+    });
   });
 });
 

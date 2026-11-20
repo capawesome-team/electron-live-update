@@ -44,7 +44,6 @@ function getBridge(): LiveUpdateBridge {
     LiveUpdateBridge | undefined;
   if (!bridge) {
     throw new LiveUpdateError(
-      ErrorCode.Unknown,
       'The live update bridge is not available. Call exposeLiveUpdateApi() from "@capawesome/electron-live-update/preload" in your preload script and attach(window) in the main process.',
     );
   }
@@ -58,8 +57,8 @@ async function invoke<T>(method: IpcMethod, options?: unknown): Promise<T> {
       result.error.code as ErrorCode,
     )
       ? (result.error.code as ErrorCode)
-      : ErrorCode.Unknown;
-    throw new LiveUpdateError(code, result.error.message);
+      : undefined;
+    throw new LiveUpdateError(result.error.message, code);
   }
   return result.value as T;
 }

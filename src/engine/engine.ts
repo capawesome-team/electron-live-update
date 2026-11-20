@@ -446,10 +446,7 @@ export class LiveUpdateEngine {
         await this.stateFile.update(s => {
           s.nextBundleId = s.currentBundleId;
         });
-        throw new LiveUpdateError(
-          ErrorCode.ChecksumMismatch,
-          'Checksum mismatch.',
-        );
+        throw new LiveUpdateError('Checksum mismatch.');
       }
       await this.stateFile.update(s => {
         s.currentBundleId = next;
@@ -500,8 +497,8 @@ export class LiveUpdateEngine {
     this.assertInitialized();
     if (this.syncInProgress) {
       throw new LiveUpdateError(
-        ErrorCode.SyncInProgress,
         'Sync is already in progress.',
+        ErrorCode.SyncInProgress,
       );
     }
     this.syncInProgress = true;
@@ -566,7 +563,7 @@ export class LiveUpdateEngine {
    * Fetch the available channels using the [Capawesome Cloud](https://capawesome.io/cloud/).
    *
    * Only works for apps with public channels enabled (Channel
-   * Discovery). Throws `ChannelDiscoveryNotEnabled` otherwise.
+   * Discovery). Throws an error without a code otherwise.
    *
    * @since 0.1.0
    */
@@ -595,13 +592,13 @@ export class LiveUpdateEngine {
   public async downloadBundle(options: DownloadBundleOptions): Promise<void> {
     this.assertInitialized();
     if (!options.url) {
-      throw new LiveUpdateError(ErrorCode.UrlMissing, 'url must be provided.');
+      throw new LiveUpdateError('url must be provided.');
     }
     assertValidBundleId(options.bundleId);
     if (await this.store.has(options.bundleId)) {
       throw new LiveUpdateError(
-        ErrorCode.BundleAlreadyExists,
         'bundle already exists.',
+        ErrorCode.BundleAlreadyExists,
       );
     }
     await this.downloadBundleInternal({
@@ -647,7 +644,7 @@ export class LiveUpdateEngine {
     }
     assertValidBundleId(options.bundleId);
     if (!(await this.store.has(options.bundleId))) {
-      throw new LiveUpdateError(ErrorCode.BundleNotFound, 'bundle not found.');
+      throw new LiveUpdateError('bundle not found.', ErrorCode.BundleNotFound);
     }
     await this.setNextBundleInternal(options.bundleId);
   }
@@ -898,7 +895,6 @@ export class LiveUpdateEngine {
   private assertInitialized(): void {
     if (!this.initialized) {
       throw new LiveUpdateError(
-        ErrorCode.NotInitialized,
         'The engine has not been initialized. Call initialize() first.',
       );
     }
@@ -911,10 +907,7 @@ export class LiveUpdateEngine {
   private requireAppId(): string {
     const appId = this.getAppId();
     if (!appId) {
-      throw new LiveUpdateError(
-        ErrorCode.AppIdMissing,
-        'appId must be configured.',
-      );
+      throw new LiveUpdateError('appId must be configured.');
     }
     return appId;
   }
@@ -973,7 +966,6 @@ export class LiveUpdateEngine {
       const bundleRoot = await findIndexHtmlDirectory(extractDirectory);
       if (!bundleRoot) {
         throw new LiveUpdateError(
-          ErrorCode.BundleIndexHtmlMissing,
           'The bundle does not contain an index.html file.',
         );
       }

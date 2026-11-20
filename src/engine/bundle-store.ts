@@ -30,14 +30,10 @@ export const RESERVED_BUNDLE_ID = 'public';
  */
 export function assertValidBundleId(bundleId: string): void {
   if (!bundleId) {
-    throw new LiveUpdateError(
-      ErrorCode.BundleIdMissing,
-      'bundleId must be provided.',
-    );
+    throw new LiveUpdateError('bundleId must be provided.');
   }
   if (bundleId === RESERVED_BUNDLE_ID) {
     throw new LiveUpdateError(
-      ErrorCode.BundleIdInvalid,
       `The bundle identifier '${RESERVED_BUNDLE_ID}' is reserved and cannot be used.`,
     );
   }
@@ -49,7 +45,6 @@ export function assertValidBundleId(bundleId: string): void {
     bundleId.includes('\0')
   ) {
     throw new LiveUpdateError(
-      ErrorCode.BundleIdInvalid,
       'The bundle identifier contains invalid characters.',
     );
   }
@@ -122,8 +117,8 @@ export class BundleStore {
   public async add(bundleId: string, sourceDirectory: string): Promise<void> {
     if (await this.has(bundleId)) {
       throw new LiveUpdateError(
-        ErrorCode.BundleAlreadyExists,
         'bundle already exists.',
+        ErrorCode.BundleAlreadyExists,
       );
     }
     // Retried: on Windows the rename fails with EPERM/EACCES while an
@@ -134,7 +129,7 @@ export class BundleStore {
 
   public async delete(bundleId: string): Promise<void> {
     if (!(await this.has(bundleId))) {
-      throw new LiveUpdateError(ErrorCode.BundleNotFound, 'bundle not found.');
+      throw new LiveUpdateError('bundle not found.', ErrorCode.BundleNotFound);
     }
     await rm(this.getPath(bundleId), RM_RETRY_OPTIONS);
   }

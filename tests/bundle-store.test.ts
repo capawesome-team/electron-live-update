@@ -15,13 +15,16 @@ describe('assertValidBundleId', () => {
 
   it('rejects an empty bundle identifier', () => {
     expect(() => assertValidBundleId('')).toThrowError(
-      expect.objectContaining({ code: ErrorCode.BundleIdMissing }),
+      expect.objectContaining({ message: 'bundleId must be provided.' }),
     );
   });
 
   it('rejects the reserved bundle identifier', () => {
     expect(() => assertValidBundleId('public')).toThrowError(
-      expect.objectContaining({ code: ErrorCode.BundleIdInvalid }),
+      expect.objectContaining({
+        message:
+          "The bundle identifier 'public' is reserved and cannot be used.",
+      }),
     );
   });
 
@@ -87,7 +90,9 @@ describe('BundleStore', () => {
 
   it('rejects paths for invalid bundle identifiers', () => {
     expect(() => store.getPath('../outside')).toThrowError(
-      expect.objectContaining({ code: ErrorCode.BundleIdInvalid }),
+      expect.objectContaining({
+        message: 'The bundle identifier contains invalid characters.',
+      }),
     );
   });
 

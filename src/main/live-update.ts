@@ -41,7 +41,7 @@ import type {
   SyncResult,
 } from '../engine/definitions';
 import { LiveUpdateEngine, type LiveUpdateLogger } from '../engine/engine';
-import { ErrorCode, LiveUpdateError } from '../engine/errors';
+import { LiveUpdateError } from '../engine/errors';
 import {
   IPC_METHODS,
   getEventChannel,
@@ -142,20 +142,15 @@ class ElectronLiveUpdateHost implements LiveUpdateHost {
 
   public serve(options?: ServeOptions): void {
     if (this.scheme !== null) {
-      throw new LiveUpdateError(
-        ErrorCode.Unknown,
-        'serve() has already been called.',
-      );
+      throw new LiveUpdateError('serve() has already been called.');
     }
     if (!this.defaultBundlePath) {
       throw new LiveUpdateError(
-        ErrorCode.Unknown,
         'serve() requires the defaultBundlePath option so that the default bundle can be served.',
       );
     }
     if (app.isReady()) {
       throw new LiveUpdateError(
-        ErrorCode.Unknown,
         'serve() must be called before the app is ready, because privileged schemes can only be registered before that point.',
       );
     }
@@ -181,7 +176,6 @@ class ElectronLiveUpdateHost implements LiveUpdateHost {
   public getServeUrl(): string {
     if (this.scheme === null) {
       throw new LiveUpdateError(
-        ErrorCode.Unknown,
         'getServeUrl() is only available after serve() has been called.',
       );
     }
@@ -390,7 +384,6 @@ class ElectronLiveUpdateHost implements LiveUpdateHost {
           const bundlePath = await this.getCurrentBundlePath();
           if (!bundlePath) {
             throw new LiveUpdateError(
-              ErrorCode.Unknown,
               'Cannot reload: no bundle is active and no defaultBundlePath is configured.',
             );
           }
@@ -442,7 +435,6 @@ class ElectronLiveUpdateHost implements LiveUpdateHost {
   private registerIpcHandlers(): void {
     if (ipcRegistered) {
       throw new LiveUpdateError(
-        ErrorCode.Unknown,
         'createLiveUpdate() may only be called once per process: the IPC channels are already registered.',
       );
     }
@@ -460,10 +452,7 @@ class ElectronLiveUpdateHost implements LiveUpdateHost {
           } catch (error) {
             return {
               error: {
-                code:
-                  error instanceof LiveUpdateError
-                    ? error.code
-                    : ErrorCode.Unknown,
+                code: error instanceof LiveUpdateError ? error.code : undefined,
                 message:
                   error instanceof Error
                     ? error.message
@@ -484,7 +473,6 @@ class ElectronLiveUpdateHost implements LiveUpdateHost {
       }
     }
     throw new LiveUpdateError(
-      ErrorCode.Unknown,
       'Live update IPC calls are only allowed from attached windows. Call attach(window) in the main process.',
     );
   }
