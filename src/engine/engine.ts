@@ -532,7 +532,10 @@ export class LiveUpdateEngine {
         });
       }
       await this.setNextBundleInternal(bundleId);
-      return { nextBundleId: bundleId };
+      return {
+        customProperties: latest.customProperties,
+        nextBundleId: bundleId,
+      };
     } finally {
       this.syncInProgress = false;
     }
