@@ -14,19 +14,19 @@ const SYMLINK_MODE = 0xa000;
  */
 function toSafeSegments(entryFileName: string): string[] {
   if (entryFileName.includes('\0')) {
-    throw new LiveUpdateError('Bundle could not be downloaded.');
+    throw new LiveUpdateError('Bundle could not be extracted.');
   }
   // Zip entries use forward slashes, but be lenient with archives
   // created by tools that emit backslashes.
   const normalized = entryFileName.replace(/\\/g, '/');
   if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) {
-    throw new LiveUpdateError('Bundle could not be downloaded.');
+    throw new LiveUpdateError('Bundle could not be extracted.');
   }
   const segments = normalized
     .split('/')
     .filter(segment => segment.length > 0 && segment !== '.');
   if (segments.some(segment => segment === '..')) {
-    throw new LiveUpdateError('Bundle could not be downloaded.');
+    throw new LiveUpdateError('Bundle could not be extracted.');
   }
   return segments;
 }
@@ -51,7 +51,7 @@ export async function extractZip(
     (resolvePromise, rejectPromise) => {
       yauzl.open(zipFilePath, { lazyEntries: true }, (error, file) => {
         if (error) {
-          rejectPromise(new LiveUpdateError('Bundle could not be downloaded.'));
+          rejectPromise(new LiveUpdateError('Bundle could not be extracted.'));
         } else {
           resolvePromise(file);
         }
@@ -65,7 +65,7 @@ export async function extractZip(
       rejectPromise(
         error instanceof LiveUpdateError
           ? error
-          : new LiveUpdateError('Bundle could not be downloaded.'),
+          : new LiveUpdateError('Bundle could not be extracted.'),
       );
     };
     zipFile.on('error', fail);
@@ -83,7 +83,7 @@ export async function extractZip(
           entryPath !== targetRoot &&
           !entryPath.startsWith(targetRoot + sep)
         ) {
-          throw new LiveUpdateError('Bundle could not be downloaded.');
+          throw new LiveUpdateError('Bundle could not be extracted.');
         }
         if (entry.fileName.endsWith('/')) {
           await mkdir(entryPath, { recursive: true });

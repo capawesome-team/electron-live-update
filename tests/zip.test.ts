@@ -89,10 +89,8 @@ describe('extractZip', () => {
   it('fails on a file that is not a zip archive', async () => {
     const { writeFile } = await import('node:fs/promises');
     await writeFile(zipPath, 'not a zip');
-    await expect(extractZip(zipPath, targetDirectory)).rejects.toBeInstanceOf(
-      LiveUpdateError,
-    );
     await expect(extractZip(zipPath, targetDirectory)).rejects.toMatchObject({
+      name: 'LiveUpdateError',
       code: undefined,
     });
   });

@@ -57,7 +57,7 @@ export class LiveUpdateError extends Error {
   }
 }
 
-export function unknownError(error: unknown): LiveUpdateError {
+export function toLiveUpdateError(error: unknown): LiveUpdateError {
   if (error instanceof LiveUpdateError) {
     return error;
   }

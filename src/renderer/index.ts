@@ -28,7 +28,7 @@ import type {
   SyncOptions,
   SyncResult,
 } from '../engine/definitions';
-import { ErrorCode, LiveUpdateError } from '../engine/errors';
+import { LiveUpdateError } from '../engine/errors';
 import {
   IPC_GLOBAL_KEY,
   type IpcEvent,
@@ -53,12 +53,7 @@ function getBridge(): LiveUpdateBridge {
 async function invoke<T>(method: IpcMethod, options?: unknown): Promise<T> {
   const result = await getBridge().invoke(method, options);
   if (!result.ok) {
-    const code = Object.values(ErrorCode).includes(
-      result.error.code as ErrorCode,
-    )
-      ? (result.error.code as ErrorCode)
-      : undefined;
-    throw new LiveUpdateError(result.error.message, code);
+    throw new LiveUpdateError(result.error.message, result.error.code);
   }
   return result.value as T;
 }

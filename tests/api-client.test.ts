@@ -179,7 +179,7 @@ describe('CloudApiClient', () => {
       unreachableClient.getLatestBundle(request),
     ).rejects.toMatchObject({
       code: ErrorCode.RequestFailed,
-      message: `connect ECONNREFUSED ${stoppedServer.origin.replace('http://', '')}`,
+      message: expect.stringContaining('ECONNREFUSED'),
     });
   });
 

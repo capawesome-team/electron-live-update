@@ -34,7 +34,7 @@ import type {
   SyncResult,
 } from './definitions';
 import { downloadFile } from './download';
-import { ErrorCode, LiveUpdateError, unknownError } from './errors';
+import { ErrorCode, LiveUpdateError, toLiveUpdateError } from './errors';
 import { StateFile } from './state-file';
 import {
   calculateContentChecksums,
@@ -978,7 +978,7 @@ export class LiveUpdateEngine {
         s.bundles[options.bundleId] = { fileChecksums };
       });
     } catch (error) {
-      throw unknownError(error);
+      throw toLiveUpdateError(error);
     } finally {
       await this.store.cleanUpStaging(stagingDirectory);
     }
