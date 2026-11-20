@@ -1,6 +1,6 @@
 import type { ArtifactType } from './definitions';
-import { isLocalhost, isTimeoutError } from './download';
-import { ErrorCode, LiveUpdateError } from './errors';
+import { isLocalhost } from './download';
+import { ErrorCode, LiveUpdateError, toRequestError } from './errors';
 
 /**
  * Response of the Capawesome Cloud latest-bundle endpoint.
@@ -161,16 +161,7 @@ export class CloudApiClient {
         // The server sent an invalid body.
         throw new LiveUpdateError('An unknown error has occurred.');
       }
-      if (isTimeoutError(error)) {
-        throw new LiveUpdateError(
-          'Request timed out.',
-          ErrorCode.RequestFailed,
-        );
-      }
-      throw new LiveUpdateError(
-        getFetchErrorMessage(error),
-        ErrorCode.RequestFailed,
-      );
+      throw toRequestError(error);
     }
   }
 
@@ -246,19 +237,4 @@ export class CloudApiClient {
       url: record.url,
     };
   }
-}
-
-/**
- * Node's `fetch` rejects with the generic "fetch failed" and keeps the
- * reason, such as "getaddrinfo ENOTFOUND", in `cause`.
- */
-function getFetchErrorMessage(error: unknown): string {
-  const cause = error instanceof Error ? error.cause : undefined;
-  if (cause instanceof Error && cause.message) {
-    return cause.message;
-  }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return 'An unknown error has occurred.';
 }

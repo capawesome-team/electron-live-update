@@ -67,3 +67,43 @@ export function toLiveUpdateError(error: unknown): LiveUpdateError {
       : 'An unknown error has occurred.';
   return new LiveUpdateError(message);
 }
+
+export function toRequestError(error: unknown): LiveUpdateError {
+  if (error instanceof LiveUpdateError) {
+    return error;
+  }
+  if (isTimeoutError(error)) {
+    return new LiveUpdateError('Request timed out.', ErrorCode.RequestFailed);
+  }
+  return new LiveUpdateError(
+    getRequestErrorMessage(error),
+    ErrorCode.RequestFailed,
+  );
+}
+
+/**
+ * Node's `fetch` rejects with the generic "fetch failed" and keeps the
+ * reason, such as "getaddrinfo ENOTFOUND", in `cause`.
+ */
+function getRequestErrorMessage(error: unknown): string {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (cause instanceof Error && cause.message) {
+    return cause.message;
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return 'An unknown error has occurred.';
+}
+
+function isTimeoutError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const name = (error as { name?: string }).name;
+  if (name === 'TimeoutError' || name === 'AbortError') {
+    return true;
+  }
+  const cause = (error as { cause?: unknown }).cause;
+  return cause !== undefined && cause !== error && isTimeoutError(cause);
+}

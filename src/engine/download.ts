@@ -2,7 +2,7 @@ import { createWriteStream } from 'node:fs';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import { ErrorCode, LiveUpdateError } from './errors';
+import { ErrorCode, LiveUpdateError, toRequestError } from './errors';
 
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -129,29 +129,4 @@ export async function downloadFile(
   } finally {
     clearTimeout(idleTimer);
   }
-}
-
-export function toRequestError(error: unknown): LiveUpdateError {
-  if (error instanceof LiveUpdateError) {
-    return error;
-  }
-  if (isTimeoutError(error)) {
-    return new LiveUpdateError('Request timed out.', ErrorCode.RequestFailed);
-  }
-  return new LiveUpdateError(
-    'Bundle could not be downloaded.',
-    ErrorCode.RequestFailed,
-  );
-}
-
-export function isTimeoutError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const name = (error as { name?: string }).name;
-  if (name === 'TimeoutError' || name === 'AbortError') {
-    return true;
-  }
-  const cause = (error as { cause?: unknown }).cause;
-  return cause !== undefined && cause !== error && isTimeoutError(cause);
 }

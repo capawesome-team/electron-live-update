@@ -143,7 +143,7 @@ describe('downloadFile', () => {
       }),
     ).rejects.toMatchObject({
       code: ErrorCode.RequestFailed,
-      message: 'Bundle could not be downloaded.',
+      message: expect.stringContaining('ECONNREFUSED'),
     });
   });
 
