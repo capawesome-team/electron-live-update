@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/capawesome-team/electron-live-update/compare/v0.1.1...v0.2.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* reduce the error codes to `BUNDLE_ALREADY_EXISTS`, `BUNDLE_NOT_FOUND`, `REQUEST_FAILED` and `SYNC_IN_PROGRESS` ([#10](https://github.com/capawesome-team/electron-live-update/issues/10))
+
+### Features
+
+* reduce the error codes to `BUNDLE_ALREADY_EXISTS`, `BUNDLE_NOT_FOUND`, `REQUEST_FAILED` and `SYNC_IN_PROGRESS` ([#10](https://github.com/capawesome-team/electron-live-update/issues/10)) ([463248b](https://github.com/capawesome-team/electron-live-update/commit/463248bb0be3d9fb25c957b0e79f156a9c9dd9b9))
+* return the custom properties of the next bundle from `sync()` ([#8](https://github.com/capawesome-team/electron-live-update/issues/8)) ([30b3911](https://github.com/capawesome-team/electron-live-update/commit/30b3911a90bbd555a8f3200d0309b7c2cbd1f002))
+
 ## [0.1.1](https://github.com/capawesome-team/electron-live-update/compare/v0.1.0...v0.1.1) (2026-10-25)
 
 
