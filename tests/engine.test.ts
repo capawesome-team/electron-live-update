@@ -249,6 +249,17 @@ describe('LiveUpdateEngine', () => {
       expect(nextBundleSetEvents).toEqual([{ bundleId: '1.1.0' }]);
     });
 
+    it('returns the custom properties of the next bundle', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await serveBundleZip('1.1.0');
+      serveLatestBundle('1.1.0', { customProperties: { key: 'value' } });
+      expect(await engine.sync()).toEqual({
+        customProperties: { key: 'value' },
+        nextBundleId: '1.1.0',
+      });
+    });
+
     it('returns null when no update is available', async () => {
       const engine = createEngine();
       await engine.initialize();
