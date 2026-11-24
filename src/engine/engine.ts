@@ -199,15 +199,15 @@ export interface LiveUpdateEngineConfig {
    */
   readyTimeout?: number;
   /**
-   * The runtime identifier reported to Capawesome Cloud.
+   * The runtime that is reported to the update server.
    *
-   * If not set, the engine reports `electron`.
+   * It must match the type of the app in Capawesome Cloud. It also names
+   * the SDK in the `User-Agent` header, for example `capacitor` or `electron`.
    *
    * @since 0.1.0
-   * @default 'electron'
    * @example 'electron'
    */
-  runtime?: string;
+  runtime: string;
   /**
    * The API domain of the [Capawesome Cloud](https://cloud.capawesome.io)
    * server **without** scheme or path.
@@ -295,7 +295,6 @@ interface DownloadableBundle {
 
 const DEFAULT_HTTP_TIMEOUT = 60000;
 const DEFAULT_READY_TIMEOUT = 0;
-const DEFAULT_RUNTIME = 'electron';
 const DEFAULT_SERVER_DOMAIN = 'api.cloud.capawesome.io';
 const MAX_BLOCKED_BUNDLES = 100;
 const ERROR_BUNDLE_INDEX_HTML_MISSING =
@@ -352,6 +351,10 @@ export class LiveUpdateEngine {
   private watchdogTimer: NodeJS.Timeout | null = null;
 
   constructor(config: LiveUpdateEngineConfig) {
+    // A host in plain JavaScript can leave out this required value.
+    if (!config.runtime) {
+      throw new LiveUpdateError('runtime must be configured.');
+    }
     this.appId = config.appId ?? null;
     this.autoBlockRolledBackBundles =
       config.autoBlockRolledBackBundles ?? false;
@@ -363,7 +366,7 @@ export class LiveUpdateEngine {
     this.pluginVersion = config.pluginVersion;
     this.publicKey = config.publicKey;
     this.readyTimeout = config.readyTimeout ?? DEFAULT_READY_TIMEOUT;
-    this.runtime = config.runtime ?? DEFAULT_RUNTIME;
+    this.runtime = config.runtime;
     this.userAgent = `capawesome-${this.runtime}-live-update/${this.pluginVersion} (${PLATFORM})`;
     this.versionCode = config.versionCode;
     this.versionName = config.versionName;

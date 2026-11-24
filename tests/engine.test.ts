@@ -1178,6 +1178,17 @@ describe('LiveUpdateEngine', () => {
       );
     });
 
+    it('cannot be created without a runtime', () => {
+      expect(() =>
+        createEngine({ runtime: undefined as unknown as string }),
+      ).toThrowError(
+        expect.objectContaining({
+          code: undefined,
+          message: 'runtime must be configured.',
+        }),
+      );
+    });
+
     it('survives a corrupt state file', async () => {
       await writeFile(join(dataDirectory, 'state.json'), '{corrupt json');
       const engine = createEngine();

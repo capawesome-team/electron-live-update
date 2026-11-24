@@ -196,10 +196,13 @@ const engine = new LiveUpdateEngine({
   versionName: '1.0.0',
   pluginVersion: '0.1.0',
   readyTimeout: 10000,
+  runtime: 'electron',
 });
 const { currentBundleId } = await engine.initialize(); // BEFORE loading web content
 // engine.sync(), engine.ready(), engine.setNextBundle(), engine.applyNextBundle(), ...
 ```
+
+`runtime` is required. It must match the type of your app in Capawesome Cloud, or the update server offers no update.
 
 ## Comparison with the Capacitor plugin
 
