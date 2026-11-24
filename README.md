@@ -276,7 +276,7 @@ Events are available in the main process (`liveUpdate.addListener(...)`) and for
 
 Only an error that an app can handle in code has a `code`: `BUNDLE_ALREADY_EXISTS`, `BUNDLE_NOT_FOUND`, `REQUEST_FAILED` and `SYNC_IN_PROGRESS`. Every other error has a message only, and its `code` is `undefined`.
 
-`REQUEST_FAILED` covers a lost connection, a timeout and an update check that the server answers with an error status. After the status 429, the SDK makes no further check for the time that the server names, and `sync()` and `fetchLatestBundle()` resolve without an update.
+`REQUEST_FAILED` covers a lost connection, a timeout and an update check that the server answers with an error status. After the status 429 or 503, the SDK makes no further check for the time that the server names, and `sync()` and `fetchLatestBundle()` resolve without an update.
 
 ```ts
 import {

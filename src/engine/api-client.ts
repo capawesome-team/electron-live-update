@@ -32,7 +32,7 @@ export interface CreateCheckRequest {
 }
 
 /**
- * The answer of a check. `result` is `null` after a 429 and for an
+ * The answer of a check. `result` is `null` after a 429 or a 503 and for an
  * answer that this version cannot read.
  */
 export interface CreateCheckResponse {
@@ -44,7 +44,7 @@ export interface CreateCheckResponse {
   reason: string | null;
   result: CheckResult | null;
   /**
-   * The milliseconds to wait before the next check, only set after a 429.
+   * The milliseconds to wait before the next check, only set after a 429 or a 503.
    */
   retryAfterMs: number | null;
 }
@@ -135,7 +135,7 @@ export class CloudApiClient {
   /**
    * Ask Capawesome Cloud for an update.
    *
-   * Rejects with `REQUEST_FAILED` for every status other than 200 and 429.
+   * Rejects with `REQUEST_FAILED` for every status other than 200, 429 and 503.
    */
   public async fetchCheck(
     request: CreateCheckRequest,
@@ -271,7 +271,7 @@ export class CloudApiClient {
   }
 
   private parseCheckResponse(response: TextResponse): CreateCheckResponse {
-    if (response.status === 429) {
+    if (response.status === 429 || response.status === 503) {
       return {
         ...createCheckResponseWithoutUpdate(),
         retryAfterMs: this.parseRetryAfterMs(
