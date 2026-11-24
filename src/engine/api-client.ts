@@ -281,7 +281,7 @@ export class CloudApiClient {
     }
     if (response.status !== 200) {
       throw new LiveUpdateError(
-        `Request failed with status code ${response.status}.`,
+        `The check failed with status ${response.status}.`,
         ErrorCode.RequestFailed,
       );
     }
