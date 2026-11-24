@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/capawesome-team/electron-live-update/compare/v0.2.0...v0.3.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* `sync()` and `fetchLatestBundle()` now reject with `REQUEST_FAILED` when the server answers the update check with an error status. `platform` is removed from `LiveUpdateEngineConfig`. `runtime` is required in `LiveUpdateEngineConfig` and must match the type of the app in Capawesome Cloud.
+
+### Features
+
+* use the new update check and report failed updates ([#11](https://github.com/capawesome-team/electron-live-update/issues/11)) ([341aabe](https://github.com/capawesome-team/electron-live-update/commit/341aabef95acaa53ef7c2b18c738f0fbc66422d0))
+
+
+### Bug Fixes
+
+* resolve without an update when the update check is answered with status 503 ([#13](https://github.com/capawesome-team/electron-live-update/issues/13)) ([6b9f1d2](https://github.com/capawesome-team/electron-live-update/commit/6b9f1d206cef0e185f4537250f5b9c872e261b26))
+
 ## [0.2.0](https://github.com/capawesome-team/electron-live-update/compare/v0.1.1...v0.2.0) (2026-11-20)
 
 
