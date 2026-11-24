@@ -328,7 +328,7 @@ export class LiveUpdateEngine {
   private readonly autoBlockRolledBackBundles: boolean;
   private readonly autoDeleteBundles: boolean;
   /**
-   * When the wait after a 429 ends, per app id, in the time of `performance.now()`.
+   * When the wait after a 429 or a 503 ends, per app id, in the time of `performance.now()`.
    */
   private readonly checkWaitEndsAt = new Map<string, number>();
   private readonly defaultChannel: string | null;
@@ -964,7 +964,7 @@ export class LiveUpdateEngine {
   }
 
   /**
-   * During the wait after a 429, no request is sent and no update is offered.
+   * During the wait after a 429 or a 503, no request is sent and no update is offered.
    */
   private async fetchCheck(
     channelOverride?: string,
@@ -972,7 +972,7 @@ export class LiveUpdateEngine {
     const appId = this.requireAppId();
     if (this.isCheckWaiting(appId)) {
       this.logger.info(
-        'No update available. No check was made because the device is rate limited.',
+        'No update available. No check was made because the server asked to wait.',
       );
       return createCheckResponseWithoutUpdate();
     }
@@ -994,7 +994,7 @@ export class LiveUpdateEngine {
     if (response.retryAfterMs !== null) {
       this.startCheckWait(appId, { retryAfterMs: response.retryAfterMs });
     } else if (failure !== null) {
-      // Every answer that is not a 429 and did not reject is a 200.
+      // Every answer without a wait that did not reject is a 200.
       await this.removeReportedFailure(failure);
     }
     return response;
@@ -1015,7 +1015,7 @@ export class LiveUpdateEngine {
   private logNoUpdateReason(response: CreateCheckResponse): void {
     if (response.retryAfterMs !== null) {
       this.logger.info(
-        `No update available. The device is rate limited for ${response.retryAfterMs} ms.`,
+        `No update available. The server asked to wait for ${response.retryAfterMs} ms.`,
       );
     } else if (
       response.result === CheckResult.Skipped &&
