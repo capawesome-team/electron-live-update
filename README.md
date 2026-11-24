@@ -127,6 +127,8 @@ A live update SDK must never leave users stuck with a broken update. This SDK pe
 
 With `autoBlockRolledBackBundles: true`, a bundle that caused a rollback is also blocked from being installed again by future `sync()` calls (up to 100 bundles; the oldest entry is unblocked when the limit is reached).
 
+A rollback and a failed update are reported to the update server with the next update check. Capawesome Cloud shows them on the Analytics page of your app.
+
 > [!IMPORTANT]
 > Rollback protection is **disabled by default** (`readyTimeout: 0`) to match the behavior of the Capacitor Live Update plugin. It is strongly recommended to set `readyTimeout` (e.g. `10000`) and call `ready()` early in your renderer. On desktop there is no app store reinstall to fall back on: uninstalling and reinstalling an Electron app usually does not clear its user data, so a broken bundle would otherwise persist until your users clear the app data manually or you ship a fixed update.
 
@@ -143,9 +145,9 @@ const liveUpdate = createLiveUpdate({
 });
 ```
 
-When a public key is configured, every downloaded bundle **must** provide a valid signature (via the `X-Signature` response header or the `signature` option) — unsigned or tampered bundles are rejected. The scheme is the same as in the Capacitor Live Update plugin: an RSA PKCS#1 v1.5 signature of the SHA-256 hash of the bundle file, encoded as base64. See the [Capawesome Cloud documentation](https://capawesome.io/cloud/) for generating keys and signing bundles.
+When a public key is configured, every downloaded bundle **must** provide a valid signature. Unsigned or tampered bundles are rejected. For a bundle hosted by Capawesome Cloud, the signature comes with the answer of the update check. For every other bundle, it comes from the `X-Signature` response header or the `signature` option. The scheme is the same as in the Capacitor Live Update plugin: an RSA PKCS#1 v1.5 signature of the SHA-256 hash of the bundle file, encoded as base64. See the [Capawesome Cloud documentation](https://capawesome.io/cloud/) for generating keys and signing bundles.
 
-Without a public key, an integrity checksum (`X-Checksum` header or `checksum` option, SHA-256 in hex format) is verified when available.
+A bundle hosted by Capawesome Cloud is always verified against the SHA-256 checksum from the answer of the update check, with or without a public key. For every other bundle, a checksum (`X-Checksum` header or `checksum` option, SHA-256 in hex format) is verified when no public key is configured and a checksum is available.
 
 ## Web bundle updates vs. binary updates
 
@@ -189,16 +191,18 @@ import { LiveUpdateEngine } from '@capawesome/electron-live-update/engine';
 const engine = new LiveUpdateEngine({
   appId: '...',
   dataDirectory: '/path/to/writable/storage',
-  platform: '2',
   osVersion: '...',
   versionCode: '1',
   versionName: '1.0.0',
   pluginVersion: '0.1.0',
   readyTimeout: 10000,
+  runtime: 'electron',
 });
 const { currentBundleId } = await engine.initialize(); // BEFORE loading web content
 // engine.sync(), engine.ready(), engine.setNextBundle(), engine.applyNextBundle(), ...
 ```
+
+`runtime` is required. It must match the type of your app in Capawesome Cloud, or the update server offers no update.
 
 ## Comparison with the Capacitor plugin
 
@@ -209,7 +213,6 @@ The API mirrors [`@capawesome/capacitor-live-update`](https://capawesome.io/plug
 | `readyTimeout` default        | `0` (disabled)                          | `0` (disabled) — same default, same recommendation to set `10000` |
 | Kill-safe boot rollback       | —                                       | Pending-boot marker on disk, checked at every process start       |
 | Activation-time verification  | —                                       | Installed bundles re-verified against install-time checksums      |
-| Rollback blocking             | On `ready()`                            | At rollback time (survives a kill before `ready()`)               |
 | Configuration                 | Capacitor config file                   | `createLiveUpdate()` options                                      |
 | `versionCode` / `versionName` | Native app version                      | `app.getVersion()` unless configured                              |
 | Device ID                     | Random UUID (Android) / vendor ID (iOS) | Random UUID, persisted per app ID                                 |
@@ -237,7 +240,7 @@ Creates the SDK. Call once, early in your main process (before `app.whenReady()`
 | `defaultBundlePath`          | `string`                 | –                                                         | Directory of the packaged web assets. Required for `serve()`.                                 |
 | `httpTimeout`                | `number`                 | `60000`                                                   | HTTP timeout in milliseconds.                                                                 |
 | `logger`                     | `LiveUpdateLogger`       | `console`                                                 | Custom logger.                                                                                |
-| `publicKey`                  | `string`                 | –                                                         | PEM-encoded RSA public key for signature verification.                                        |
+| `publicKey`                  | `string`                 | –                                                         | PEM-encoded RSA public key for signature verification. May be written in one line.            |
 | `readyTimeout`               | `number`                 | `0`                                                       | Rollback protection timeout in milliseconds. `0` disables it. Recommended: `10000`.           |
 | `serverDomain`               | `string`                 | `'api.cloud.capawesome.io'`                               | API domain, without scheme or path. Localhost domains use plain HTTP for development.         |
 | `versionCode`                | `string`                 | `app.getVersion()`                                        | Version code reported to the update server.                                                   |
@@ -272,6 +275,8 @@ Events are available in the main process (`liveUpdate.addListener(...)`) and for
 #### Errors
 
 Only an error that an app can handle in code has a `code`: `BUNDLE_ALREADY_EXISTS`, `BUNDLE_NOT_FOUND`, `REQUEST_FAILED` and `SYNC_IN_PROGRESS`. Every other error has a message only, and its `code` is `undefined`.
+
+`REQUEST_FAILED` covers a lost connection, a timeout and an update check that the server answers with an error status. After the status 429, the SDK makes no further check for the time that the server names, and `sync()` and `fetchLatestBundle()` resolve without an update.
 
 ```ts
 import {

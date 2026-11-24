@@ -42,6 +42,7 @@ export interface DownloadFileOptions {
   httpTimeout: number;
   onProgress?: (downloadedBytes: number, totalBytes: number) => void;
   url: string;
+  userAgent: string;
 }
 
 export interface DownloadFileResult {
@@ -58,13 +59,42 @@ export interface DownloadFileResult {
 /**
  * Download a file to disk, reporting progress and returning the
  * verification headers of the response.
- *
- * `httpTimeout` is an idle timeout: it limits the wait for the
- * response headers and for every body chunk, not the total transfer.
  */
 export async function downloadFile(
   options: DownloadFileOptions,
 ): Promise<DownloadFileResult> {
+  const responseHeaders = await downloadFileWithHeaders(options, {
+    requestHeaders: { 'User-Agent': options.userAgent },
+  });
+  return {
+    checksum: responseHeaders.get('x-checksum') ?? undefined,
+    signature: responseHeaders.get('x-signature') ?? undefined,
+  };
+}
+
+/**
+ * Download a file to disk without compression, so that the response
+ * carries the total size for the progress. No response header is read.
+ */
+export async function downloadFileWithoutCompression(
+  options: DownloadFileOptions,
+): Promise<void> {
+  await downloadFileWithHeaders(options, {
+    requestHeaders: {
+      'Accept-Encoding': 'identity',
+      'User-Agent': options.userAgent,
+    },
+  });
+}
+
+/**
+ * `httpTimeout` is an idle timeout: it limits the wait for the
+ * response headers and for every body chunk, not the total transfer.
+ */
+async function downloadFileWithHeaders(
+  options: DownloadFileOptions,
+  { requestHeaders }: { requestHeaders: Record<string, string> },
+): Promise<Headers> {
   const url = assertSecureUrl(options.url);
   const controller = new AbortController();
   let idleTimer: NodeJS.Timeout | undefined;
@@ -82,7 +112,10 @@ export async function downloadFile(
   try {
     let response: Response;
     try {
-      response = await fetch(url, { signal: controller.signal });
+      response = await fetch(url, {
+        headers: requestHeaders,
+        signal: controller.signal,
+      });
     } catch (error) {
       throw toRequestError(error);
     }
@@ -122,10 +155,7 @@ export async function downloadFile(
     } catch (error) {
       throw toRequestError(error);
     }
-    return {
-      checksum: response.headers.get('x-checksum') ?? undefined,
-      signature: response.headers.get('x-signature') ?? undefined,
-    };
+    return response.headers;
   } finally {
     clearTimeout(idleTimer);
   }

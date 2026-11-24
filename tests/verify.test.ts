@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,6 +9,7 @@ import {
   parsePublicKey,
   verifyContentChecksums,
   verifyDownloadedFile,
+  verifyFileFromUrlTemplate,
 } from '../src/engine/verify';
 
 import {
@@ -140,6 +141,39 @@ describe('verification', () => {
         checksum: 'a'.repeat(64),
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('verifies a signature with a public key in one line', async () => {
+    const { privateKeyPem, publicKeyPem } = generateRsaKeyPair();
+    const signature = signBytes(fileContent, privateKeyPem);
+    await expect(
+      verifyDownloadedFile({
+        filePath,
+        publicKey: publicKeyPem.replace(/\n/g, ''),
+        signature,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('reads a public key with the label RSA PUBLIC KEY', () => {
+    const { publicKeyPem } = generateRsaKeyPair();
+    const rsaPublicKeyPem = createPublicKey(publicKeyPem)
+      .export({ format: 'pem', type: 'pkcs1' })
+      .toString();
+    expect(rsaPublicKeyPem).toContain('BEGIN RSA PUBLIC KEY');
+    expect(parsePublicKey(rsaPublicKeyPem).asymmetricKeyType).toBe('rsa');
+  });
+
+  it('verifies the checksum of a file from a URL template also with a public key', async () => {
+    const { privateKeyPem, publicKeyPem } = generateRsaKeyPair();
+    await expect(
+      verifyFileFromUrlTemplate({
+        checksum: 'a'.repeat(64),
+        filePath,
+        publicKey: publicKeyPem,
+        signature: signBytes(fileContent, privateKeyPem),
+      }),
+    ).rejects.toMatchObject({ message: 'Checksum mismatch.' });
   });
 
   it('rejects an invalid public key', () => {

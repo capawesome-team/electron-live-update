@@ -1,5 +1,5 @@
 import type * as fsPromises from 'node:fs/promises';
-import { readFile, rename } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -103,5 +103,30 @@ describe('StateFile', () => {
     const persisted = await readPersistedState(directory);
     expect(persisted.currentBundleId).toBe('2.0.0');
     expect(persisted.nextBundleId).toBe('3.0.0');
+  });
+
+  it('loads a state file of release 0.2.0', async () => {
+    const stateOfRelease020 = {
+      appIdOverride: null,
+      blockedBundleIds: [],
+      bundles: { '1.0.0': { fileChecksums: { 'index.html': 'a'.repeat(64) } } },
+      channel: 'beta',
+      currentBundleId: '1.0.0',
+      customId: 'user-1',
+      deviceIds: { 'app-123': 'device-1' },
+      lastVersionCode: '1',
+      nextBundleId: '1.0.0',
+      pendingBoot: null,
+      previousBundleId: '1.0.0',
+    };
+    await writeFile(
+      join(directory, 'state.json'),
+      JSON.stringify(stateOfRelease020),
+    );
+    await stateFile.load();
+    expect(stateFile.get()).toEqual({
+      ...stateOfRelease020,
+      pendingFailure: null,
+    });
   });
 });

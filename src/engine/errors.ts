@@ -21,8 +21,8 @@ export enum ErrorCode {
   BundleNotFound = 'BUNDLE_NOT_FOUND',
   /**
    * A request to the server failed. This happens if the device has no
-   * connection, the request timed out or a bundle could not be
-   * downloaded.
+   * connection, the request timed out, the server answered a check with
+   * an error status or a bundle could not be downloaded.
    *
    * @since 0.2.0
    */

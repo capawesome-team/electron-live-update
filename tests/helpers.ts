@@ -168,6 +168,7 @@ export function signBytes(bytes: Buffer, privateKeyPem: string): string {
 }
 
 export interface RecordedRequest {
+  body: string;
   headers: IncomingMessage['headers'];
   method: string;
   url: URL;
@@ -207,9 +208,9 @@ export class MockServer {
   }
 
   public async start(): Promise<void> {
-    this.server = createServer((request, response) =>
-      this.handle(request, response),
-    );
+    this.server = createServer((request, response) => {
+      void this.handle(request, response);
+    });
     this.server.on('connection', socket => {
       this.sockets.add(socket);
       socket.on('close', () => this.sockets.delete(socket));
@@ -234,9 +235,17 @@ export class MockServer {
     this.server = null;
   }
 
-  private handle(request: IncomingMessage, response: ServerResponse): void {
+  private async handle(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
     const url = new URL(request.url ?? '/', this.origin);
+    let body = '';
+    for await (const chunk of request) {
+      body += chunk;
+    }
     this.requests.push({
+      body,
       headers: request.headers,
       method: request.method ?? 'GET',
       url,
