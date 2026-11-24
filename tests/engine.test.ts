@@ -16,6 +16,8 @@ import { ErrorCode } from '../src/engine/errors';
 
 import {
   MockServer,
+  type MockServerHandler,
+  type MockServerRoute,
   buildZip,
   createDefaultBundleEntries,
   createTemporaryDirectory,
@@ -59,7 +61,6 @@ describe('LiveUpdateEngine', () => {
       dataDirectory,
       logger: silentLogger,
       osVersion: '25.0.0',
-      platform: '2',
       pluginVersion: '0.0.1',
       runtime: 'electron',
       serverDomain: server.origin.replace('http://', ''),
@@ -80,18 +81,48 @@ describe('LiveUpdateEngine', () => {
     return zip;
   }
 
-  function serveLatestBundle(
+  function serveAvailableBundle(
     bundleId: string,
     extra: Record<string, unknown> = {},
   ): void {
-    server.route('/v1/apps/app-123/bundles/latest', {
+    serveCheckResponse({
       body: JSON.stringify({
-        bundleId,
-        url: `${server.origin}/download/${bundleId}.zip`,
-        ...extra,
+        bundle: {
+          artifactType: 'zip',
+          id: bundleId,
+          url: `${server.origin}/download/${bundleId}.zip`,
+          ...extra,
+        },
+        channelName: 'production',
+        result: 'available',
       }),
-      headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  function serveNoUpdate(appId = 'app-123'): void {
+    serveCheckResponse(
+      { body: JSON.stringify({ bundle: null, result: 'up_to_date' }) },
+      { appId },
+    );
+  }
+
+  function serveCheckResponse(
+    route: MockServerRoute | MockServerHandler,
+    { appId }: { appId: string } = { appId: 'app-123' },
+  ): void {
+    server.route(`/v1/live-updates/apps/${appId}/checks`, route);
+  }
+
+  function getCheckBodies(): Record<string, unknown>[] {
+    return server.requests
+      .filter(request => request.url.pathname.endsWith('/checks'))
+      .map(request => JSON.parse(request.body) as Record<string, unknown>);
+  }
+
+  async function readState(): Promise<Record<string, unknown>> {
+    return JSON.parse(
+      await readFile(join(dataDirectory, 'state.json'), 'utf8'),
+    ) as Record<string, unknown>;
   }
 
   describe('downloadBundle', () => {
@@ -239,7 +270,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       const nextBundleSetEvents: NextBundleSetEvent[] = [];
       engine.on('nextBundleSet', event => nextBundleSetEvents.push(event));
       const result = await engine.sync();
@@ -253,7 +284,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0', { customProperties: { key: 'value' } });
+      serveAvailableBundle('1.1.0', { customProperties: { key: 'value' } });
       expect(await engine.sync()).toEqual({
         customProperties: { key: 'value' },
         nextBundleId: '1.1.0',
@@ -263,18 +294,132 @@ describe('LiveUpdateEngine', () => {
     it('returns null when no update is available', async () => {
       const engine = createEngine();
       await engine.initialize();
-      server.route('/v1/apps/app-123/bundles/latest', {
-        body: 'not found',
-        status: 404,
+      serveNoUpdate();
+      expect(await engine.sync()).toEqual({ nextBundleId: null });
+    });
+
+    it('does not install the bundle of an up to date answer', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await serveBundleZip('1.1.0');
+      serveCheckResponse({
+        body: JSON.stringify({
+          bundle: {
+            artifactType: 'zip',
+            id: '1.1.0',
+            url: `${server.origin}/download/1.1.0.zip`,
+          },
+          result: 'up_to_date',
+        }),
       });
       expect(await engine.sync()).toEqual({ nextBundleId: null });
+      expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
+    });
+
+    it('fetchLatestBundle returns the bundle of an up to date answer with its plain address', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      serveCheckResponse({
+        body: JSON.stringify({
+          bundle: {
+            artifactType: 'zip',
+            checksum: 'a'.repeat(64),
+            id: '1.1.0',
+            legacyUrl: 'https://legacy.example.com/bundles/1.1.0.zip',
+            urlTemplate: 'https://files.example.com/{checksum}',
+          },
+          channelName: 'production',
+          result: 'up_to_date',
+        }),
+      });
+      expect(await engine.fetchLatestBundle()).toMatchObject({
+        bundleId: '1.1.0',
+        downloadUrl: 'https://legacy.example.com/bundles/1.1.0.zip',
+      });
+    });
+
+    it('loads the zip file of a bundle with a URL template from the template', async () => {
+      const { privateKeyPem, publicKeyPem } = generateRsaKeyPair();
+      const engine = createEngine({ publicKey: publicKeyPem });
+      await engine.initialize();
+      const zip = await buildZip(createDefaultBundleEntries('1.1.0'));
+      const checksum = createHash('sha256').update(zip).digest('hex');
+      server.route(`/files/${checksum}`, { body: zip });
+      serveAvailableBundle('1.1.0', {
+        checksum,
+        signature: signBytes(zip, privateKeyPem),
+        urlTemplate: `${server.origin}/files/{checksum}`,
+      });
+      expect(await engine.sync()).toEqual({ nextBundleId: '1.1.0' });
+      expect(server.requests.map(request => request.url.pathname)).toContain(
+        `/files/${checksum}`,
+      );
+    });
+
+    it('rejects a bundle that is not a zip file', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      serveAvailableBundle('1.1.0', { artifactType: 'manifest' });
+      await expect(engine.sync()).rejects.toMatchObject({
+        message: 'The artifact type is not supported by this SDK.',
+      });
+    });
+
+    it('sends no check during the wait after a 429', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      serveCheckResponse({
+        body: 'Too many requests',
+        headers: { 'Retry-After': '60' },
+        status: 429,
+      });
+      expect(await engine.sync()).toEqual({ nextBundleId: null });
+      expect(await engine.fetchLatestBundle()).toEqual({ bundleId: null });
+      expect(getCheckBodies()).toHaveLength(1);
+    });
+
+    it('sends a failure until a check is answered with 200', async () => {
+      const engine = createEngine();
+      await engine.initialize();
+      await serveBundleZip('1.1.0');
+      await expect(
+        engine.downloadBundle({
+          bundleId: '1.1.0',
+          checksum: 'f'.repeat(64),
+          url: `${server.origin}/download/1.1.0.zip`,
+        }),
+      ).rejects.toMatchObject({ message: 'Checksum mismatch.' });
+      expect((await readState()).pendingFailure).toEqual({
+        appId: 'app-123',
+        bundleId: '1.1.0',
+        reason: 'checksum_mismatched',
+      });
+      serveCheckResponse({ body: 'boom', status: 500 });
+      await engine.sync().catch(() => undefined);
+      serveCheckResponse({
+        body: 'Too many requests',
+        headers: { 'Retry-After': '0' },
+        status: 429,
+      });
+      await engine.sync();
+      serveNoUpdate();
+      await engine.sync();
+      await engine.sync();
+      const failure = { bundleId: '1.1.0', reason: 'checksum_mismatched' };
+      expect(getCheckBodies().map(body => body.failure)).toEqual([
+        failure,
+        failure,
+        failure,
+        undefined,
+      ]);
+      expect((await readState()).pendingFailure).toBeNull();
     });
 
     it('returns null when the latest bundle is the current bundle', async () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       const secondEngine = createEngine();
       await secondEngine.initialize();
@@ -285,7 +430,7 @@ describe('LiveUpdateEngine', () => {
     it('skips blocked bundles', async () => {
       const engine = createEngine();
       await engine.initialize();
-      serveLatestBundle('bad-bundle');
+      serveAvailableBundle('bad-bundle');
       // Block the bundle by writing it into the state via a rollback below;
       // here we simulate by syncing a bundle marked as blocked beforehand.
       await serveBundleZip('bad-bundle');
@@ -297,7 +442,7 @@ describe('LiveUpdateEngine', () => {
     it('rejects concurrent sync operations', async () => {
       const engine = createEngine({ httpTimeout: 500 });
       await engine.initialize();
-      server.route('/v1/apps/app-123/bundles/latest', () => null);
+      serveCheckResponse(() => null);
       const firstSync = engine.sync().catch(() => undefined);
       await expect(engine.sync()).rejects.toMatchObject({
         code: ErrorCode.SyncInProgress,
@@ -317,26 +462,16 @@ describe('LiveUpdateEngine', () => {
     it('passes the persisted channel and the channel override', async () => {
       const engine = createEngine({ defaultChannel: 'stable' });
       await engine.initialize();
-      server.route('/v1/apps/app-123/bundles/latest', {
-        body: 'no',
-        status: 404,
-      });
+      serveNoUpdate();
       await engine.sync();
-      expect(server.requests[0]?.url.searchParams.get('channelName')).toBe(
-        'stable',
-      );
-      expect(server.requests[0]?.url.searchParams.get('runtime')).toBe(
-        'electron',
-      );
       await engine.setChannel({ channel: 'beta' });
       await engine.sync();
-      expect(server.requests[1]?.url.searchParams.get('channelName')).toBe(
-        'beta',
-      );
       await engine.sync({ channel: 'canary' });
-      expect(server.requests[2]?.url.searchParams.get('channelName')).toBe(
+      expect(getCheckBodies().map(body => body.channelName)).toEqual([
+        'stable',
+        'beta',
         'canary',
-      );
+      ]);
     });
   });
 
@@ -345,7 +480,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       const restartedEngine = createEngine();
       const result = await restartedEngine.initialize();
@@ -359,7 +494,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       const result = await engine.applyNextBundle();
       expect(result.currentBundleId).toBe('1.1.0');
@@ -370,7 +505,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       await engine.applyNextBundle();
       await engine.reset();
@@ -384,7 +519,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       await engine.deleteBundle({ bundleId: '1.1.0' });
       expect((await engine.getDownloadedBundles()).bundleIds).toEqual([]);
@@ -395,7 +530,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       await engine.applyNextBundle();
       await engine.deleteBundle({ bundleId: '1.1.0' });
@@ -494,7 +629,7 @@ describe('LiveUpdateEngine', () => {
       it('sync rejects it', async () => {
         const engine = createEngine();
         await engine.initialize();
-        serveLatestBundle('../outside');
+        serveAvailableBundle('../outside');
         await expect(engine.sync()).rejects.toMatchObject({
           message: 'The bundle identifier contains invalid characters.',
         });
@@ -594,6 +729,11 @@ describe('LiveUpdateEngine', () => {
       expect((await relaunchedEngine.getBlockedBundles()).bundleIds).toEqual([
         '1.1.0',
       ]);
+      expect((await readState()).pendingFailure).toEqual({
+        appId: 'app-123',
+        bundleId: '1.1.0',
+        reason: 'app_crashed',
+      });
       const readyResult = await relaunchedEngine.ready();
       expect(readyResult).toEqual({
         currentBundleId: null,
@@ -665,6 +805,11 @@ describe('LiveUpdateEngine', () => {
       ]);
       expect((await engine.getCurrentBundle()).bundleId).toBeNull();
       expect((await engine.getBlockedBundles()).bundleIds).toEqual(['1.1.0']);
+      expect((await readState()).pendingFailure).toEqual({
+        appId: 'app-123',
+        bundleId: '1.1.0',
+        reason: 'readiness_timed_out',
+      });
       const readyResult = await engine.ready();
       expect(readyResult.rollback).toBe(true);
     });
@@ -732,7 +877,7 @@ describe('LiveUpdateEngine', () => {
       });
       await relaunchedEngine.initialize();
       // The server still offers the broken bundle.
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       expect(await relaunchedEngine.sync()).toEqual({ nextBundleId: null });
       await relaunchedEngine.clearBlockedBundles();
       expect((await relaunchedEngine.getBlockedBundles()).bundleIds).toEqual(
@@ -766,7 +911,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       await writeFile(
         join(dataDirectory, 'bundles', '1.1.0', 'index.html'),
@@ -786,7 +931,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine({ readyTimeout: 10000 });
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       await engine.applyNextBundle();
       await engine.ready();
@@ -812,7 +957,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine({ readyTimeout: 10000 });
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       await engine.applyNextBundle();
       const updatedEngine = createEngine({
@@ -827,7 +972,7 @@ describe('LiveUpdateEngine', () => {
       const engine = createEngine();
       await engine.initialize();
       await serveBundleZip('1.1.0');
-      serveLatestBundle('1.1.0');
+      serveAvailableBundle('1.1.0');
       await engine.sync();
       const restartedEngine = createEngine({ versionName: '1.0.1' });
       const result = await restartedEngine.initialize();
@@ -852,17 +997,14 @@ describe('LiveUpdateEngine', () => {
       expect(await restartedEngine.getConfig()).toEqual({
         appId: 'other-app',
       });
-      server.route('/v1/apps/other-app/bundles/latest', {
-        body: 'no',
-        status: 404,
-      });
+      serveNoUpdate('other-app');
       server.route('/v1/apps/other-app/channels', { body: '[]' });
       await restartedEngine.sync();
       await restartedEngine.fetchLatestBundle();
       await restartedEngine.fetchChannels();
       expect(server.requests.map(request => request.url.pathname)).toEqual([
-        '/v1/apps/other-app/bundles/latest',
-        '/v1/apps/other-app/bundles/latest',
+        '/v1/live-updates/apps/other-app/checks',
+        '/v1/live-updates/apps/other-app/checks',
         '/v1/apps/other-app/channels',
       ]);
     });
@@ -1002,20 +1144,22 @@ describe('LiveUpdateEngine', () => {
   });
 
   describe('injectable runtime and pluginVersion', () => {
-    it('sends the injected pluginVersion and runtime', async () => {
+    it('sends the injected pluginVersion and runtime in the body and the user agent', async () => {
       const engine = createEngine({
         pluginVersion: '8.4.0',
         runtime: 'capacitor',
       });
       await engine.initialize();
-      server.route('/v1/apps/app-123/bundles/latest', {
-        body: 'no',
-        status: 404,
-      });
+      serveNoUpdate();
       await engine.sync();
-      const params = server.requests[0]?.url.searchParams;
-      expect(params?.get('pluginVersion')).toBe('8.4.0');
-      expect(params?.get('runtime')).toBe('capacitor');
+      expect(getCheckBodies()[0]).toMatchObject({
+        platform: 'electron',
+        pluginVersion: '8.4.0',
+        runtime: 'capacitor',
+      });
+      expect(server.requests[0]?.headers['user-agent']).toBe(
+        'capawesome-capacitor-live-update/8.4.0 (electron)',
+      );
     });
   });
 

@@ -2,7 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 
-import { CloudApiClient, type GetLatestBundleResponse } from './api-client';
+import {
+  CheckResult,
+  CloudApiClient,
+  PLATFORM,
+  createCheckResponseWithoutUpdate,
+  type CreateCheckResponse,
+  type CreateCheckResponseBundle,
+} from './api-client';
 import { BundleStore, assertValidBundleId } from './bundle-store';
 import type {
   DeleteBundleOptions,
@@ -33,16 +40,26 @@ import type {
   SyncOptions,
   SyncResult,
 } from './definitions';
-import { downloadFile } from './download';
+import { downloadFile, downloadFileWithoutCompression } from './download';
 import { ErrorCode, LiveUpdateError, toLiveUpdateError } from './errors';
-import { StateFile } from './state-file';
+import { FailureReason, StateFile, type UpdateFailure } from './state-file';
 import {
+  ERROR_CHECKSUM_MISMATCH,
+  ERROR_PUBLIC_KEY_INVALID,
+  ERROR_SIGNATURE_MISSING,
+  ERROR_SIGNATURE_VERIFICATION_FAILED,
+  buildFileUrl,
   calculateContentChecksums,
   parsePublicKey,
   verifyContentChecksums,
   verifyDownloadedFile,
+  verifyFileFromUrlTemplate,
 } from './verify';
-import { extractZip, findIndexHtmlDirectory } from './zip';
+import {
+  ERROR_BUNDLE_EXTRACTION_FAILED,
+  extractZip,
+  findIndexHtmlDirectory,
+} from './zip';
 
 /**
  * Logger used by the engine. Defaults to `console`.
@@ -60,7 +77,7 @@ export interface LiveUpdateLogger {
  * Configuration of the live update engine.
  *
  * The engine is host-agnostic: everything that depends on the runtime
- * (paths, version information, platform identity) is injected.
+ * (paths, version information, runtime) is injected.
  *
  * @since 0.1.0
  */
@@ -146,14 +163,8 @@ export interface LiveUpdateEngineConfig {
    */
   osVersion: string;
   /**
-   * The platform identifier reported to Capawesome Cloud.
-   *
-   * @since 0.1.0
-   */
-  platform: string;
-  /**
-   * The plugin version reported to Capawesome Cloud (the `pluginVersion`
-   * request parameter).
+   * The plugin version reported to Capawesome Cloud in the check and in
+   * the `User-Agent` header.
    *
    * The standalone Electron SDK reports the SDK version; a Capacitor
    * adapter reports the plugin package version.
@@ -190,10 +201,10 @@ export interface LiveUpdateEngineConfig {
   /**
    * The runtime identifier reported to Capawesome Cloud.
    *
-   * If not set, no runtime is reported and the server assumes its
-   * default runtime.
+   * If not set, the engine reports `electron`.
    *
    * @since 0.1.0
+   * @default 'electron'
    * @example 'electron'
    */
   runtime?: string;
@@ -271,10 +282,24 @@ export interface EngineEventMap {
   rolledBack: RolledBackEvent;
 }
 
+/**
+ * A bundle to download, from the check or from `downloadBundle()`.
+ */
+interface DownloadableBundle {
+  bundleId: string;
+  checksum?: string;
+  signature?: string;
+  url: string;
+  urlTemplate?: string;
+}
+
 const DEFAULT_HTTP_TIMEOUT = 60000;
 const DEFAULT_READY_TIMEOUT = 0;
+const DEFAULT_RUNTIME = 'electron';
 const DEFAULT_SERVER_DOMAIN = 'api.cloud.capawesome.io';
 const MAX_BLOCKED_BUNDLES = 100;
+const ERROR_BUNDLE_INDEX_HTML_MISSING =
+  'The bundle does not contain an index.html file.';
 const DEFAULT_FETCH_CHANNELS_LIMIT = 50;
 const DEFAULT_FETCH_CHANNELS_OFFSET = 0;
 
@@ -291,7 +316,7 @@ const defaultLogger: LiveUpdateLogger = {
  * Pure Node.js update logic: Cloud protocol client, bundle store,
  * persisted state with a kill-safe rollback state machine, and the
  * download/extract/verify pipeline. The engine has no dependency on
- * Electron or Capacitor; hosts inject paths and platform identity.
+ * Electron or Capacitor. Hosts inject paths and version information.
  *
  * Lifecycle: construct, `await initialize()` once at process start
  * (BEFORE loading any web content), then use the vocabulary methods.
@@ -303,21 +328,25 @@ export class LiveUpdateEngine {
   private readonly appId: string | null;
   private readonly autoBlockRolledBackBundles: boolean;
   private readonly autoDeleteBundles: boolean;
+  /**
+   * When the wait after a 429 ends, per app id, in the time of `performance.now()`.
+   */
+  private readonly checkWaitEndsAt = new Map<string, number>();
   private readonly defaultChannel: string | null;
   private readonly emitter = new EventEmitter();
   private readonly httpTimeout: number;
   private initialized = false;
   private readonly logger: LiveUpdateLogger;
   private readonly osVersion: string;
-  private readonly platform: string;
   private readonly pluginVersion: string;
   private readonly publicKey: string | undefined;
   private readonly readyTimeout: number;
   private rollbackPerformed = false;
-  private readonly runtime: string | null;
+  private readonly runtime: string;
   private readonly stateFile: StateFile;
   private readonly store: BundleStore;
   private syncInProgress = false;
+  private readonly userAgent: string;
   private readonly versionCode: string;
   private readonly versionName: string;
   private watchdogTimer: NodeJS.Timeout | null = null;
@@ -331,16 +360,17 @@ export class LiveUpdateEngine {
     this.httpTimeout = config.httpTimeout ?? DEFAULT_HTTP_TIMEOUT;
     this.logger = config.logger ?? defaultLogger;
     this.osVersion = config.osVersion;
-    this.platform = config.platform;
     this.pluginVersion = config.pluginVersion;
     this.publicKey = config.publicKey;
     this.readyTimeout = config.readyTimeout ?? DEFAULT_READY_TIMEOUT;
-    this.runtime = config.runtime ?? null;
+    this.runtime = config.runtime ?? DEFAULT_RUNTIME;
+    this.userAgent = `capawesome-${this.runtime}-live-update/${this.pluginVersion} (${PLATFORM})`;
     this.versionCode = config.versionCode;
     this.versionName = config.versionName;
     this.apiClient = new CloudApiClient({
       httpTimeout: this.httpTimeout,
       serverDomain: config.serverDomain ?? DEFAULT_SERVER_DOMAIN,
+      userAgent: this.userAgent,
     });
     this.stateFile = new StateFile(config.dataDirectory);
     this.store = new BundleStore(config.dataDirectory);
@@ -390,6 +420,14 @@ export class LiveUpdateEngine {
         }
       });
       this.rollbackPerformed = true;
+      const appId = this.getAppId();
+      if (appId !== null) {
+        await this.trySetPendingFailure({
+          appId,
+          bundleId: failedBundleId,
+          reason: FailureReason.AppCrashed,
+        });
+      }
     } else if (originalNext !== state.currentBundleId) {
       // Promote the pending next bundle (set by sync()/setNextBundle()
       // before the last shutdown) with activation-time re-verification.
@@ -446,7 +484,7 @@ export class LiveUpdateEngine {
         await this.stateFile.update(s => {
           s.nextBundleId = s.currentBundleId;
         });
-        throw new LiveUpdateError('Checksum mismatch.');
+        throw new LiveUpdateError(ERROR_CHECKSUM_MISMATCH);
       }
       await this.stateFile.update(s => {
         s.currentBundleId = next;
@@ -503,35 +541,37 @@ export class LiveUpdateEngine {
     }
     this.syncInProgress = true;
     try {
-      const latest = await this.fetchLatestBundleInternal(options?.channel);
-      if (!latest) {
-        this.logger.info('No update available.');
+      const response = await this.fetchCheck(options?.channel);
+      const bundle = response.bundle;
+      if (response.result !== CheckResult.Available || bundle === null) {
+        this.logNoUpdateReason(response);
         return { nextBundleId: null };
       }
-      const bundleId = latest.bundleId;
-      assertValidBundleId(bundleId);
+      assertValidBundleId(bundle.id);
       const state = this.stateFile.get();
-      if (state.blockedBundleIds.includes(bundleId)) {
+      if (state.blockedBundleIds.includes(bundle.id)) {
         this.logger.info(
-          `Bundle '${bundleId}' is blocked and will be skipped.`,
+          `Bundle '${bundle.id}' is blocked and will be skipped.`,
         );
         return { nextBundleId: null };
       }
-      if (bundleId === state.currentBundleId) {
+      if (bundle.id === state.currentBundleId) {
         return { nextBundleId: null };
       }
-      if (!(await this.store.has(bundleId))) {
-        await this.downloadBundleInternal({
-          bundleId,
-          checksum: latest.checksum,
-          signature: latest.signature,
-          url: latest.url,
+      assertSupportedArtifactType(bundle);
+      if (!(await this.store.has(bundle.id))) {
+        await this.downloadBundleAndRecordFailure({
+          bundleId: bundle.id,
+          checksum: bundle.checksum,
+          signature: bundle.signature,
+          url: bundle.url,
+          urlTemplate: bundle.urlTemplate,
         });
       }
-      await this.setNextBundleInternal(bundleId);
+      await this.setNextBundleInternal(bundle.id);
       return {
-        customProperties: latest.customProperties,
-        nextBundleId: bundleId,
+        customProperties: bundle.customProperties,
+        nextBundleId: bundle.id,
       };
     } finally {
       this.syncInProgress = false;
@@ -547,18 +587,23 @@ export class LiveUpdateEngine {
     options?: FetchLatestBundleOptions,
   ): Promise<FetchLatestBundleResult> {
     this.assertInitialized();
-    const latest = await this.fetchLatestBundleInternal(options?.channel);
-    if (!latest) {
+    const response = await this.fetchCheck(options?.channel);
+    if (response.result !== CheckResult.Available) {
+      this.logNoUpdateReason(response);
+    }
+    const bundle = response.bundle;
+    if (bundle === null) {
       return { bundleId: null };
     }
+    assertSupportedArtifactType(bundle);
     return {
-      artifactType: latest.artifactType,
-      bundleId: latest.bundleId,
-      channel: latest.channelName,
-      checksum: latest.checksum,
-      customProperties: latest.customProperties,
-      downloadUrl: latest.url,
-      signature: latest.signature,
+      artifactType: 'zip',
+      bundleId: bundle.id,
+      channel: response.channelName ?? undefined,
+      checksum: bundle.checksum,
+      customProperties: bundle.customProperties,
+      downloadUrl: bundle.url,
+      signature: bundle.signature,
     };
   }
 
@@ -604,7 +649,7 @@ export class LiveUpdateEngine {
         ErrorCode.BundleAlreadyExists,
       );
     }
-    await this.downloadBundleInternal({
+    await this.downloadBundleAndRecordFailure({
       bundleId: options.bundleId,
       checksum: options.checksum,
       signature: options.signature,
@@ -915,73 +960,237 @@ export class LiveUpdateEngine {
     return appId;
   }
 
-  private async fetchLatestBundleInternal(
+  /**
+   * During the wait after a 429, no request is sent and no update is offered.
+   */
+  private async fetchCheck(
     channelOverride?: string,
-  ): Promise<GetLatestBundleResponse | null> {
+  ): Promise<CreateCheckResponse> {
     const appId = this.requireAppId();
+    if (this.isCheckWaiting(appId)) {
+      this.logger.info(
+        'No update available. No check was made because the device is rate limited.',
+      );
+      return createCheckResponseWithoutUpdate();
+    }
+    const failure = this.getPendingFailure(appId);
     const state = this.stateFile.get();
-    const channel = channelOverride ?? state.channel ?? this.defaultChannel;
-    return this.apiClient.getLatestBundle({
+    const response = await this.apiClient.fetchCheck({
       appId,
       appVersionCode: this.versionCode,
       appVersionName: this.versionName,
       bundleId: state.currentBundleId,
-      channelName: channel,
+      channelName: channelOverride ?? state.channel ?? this.defaultChannel,
       customId: state.customId,
       deviceId: await this.getOrCreateDeviceId(),
+      failure,
       osVersion: this.osVersion,
-      platform: this.platform,
       pluginVersion: this.pluginVersion,
       runtime: this.runtime,
     });
+    if (response.retryAfterMs !== null) {
+      this.startCheckWait(appId, { retryAfterMs: response.retryAfterMs });
+    } else if (failure !== null) {
+      // Every answer that is not a 429 and did not reject is a 200.
+      await this.removeReportedFailure(failure);
+    }
+    return response;
   }
 
-  private async downloadBundleInternal(options: {
-    bundleId: string;
-    checksum?: string;
-    signature?: string;
-    url: string;
-  }): Promise<void> {
+  private isCheckWaiting(appId: string): boolean {
+    const waitEndsAt = this.checkWaitEndsAt.get(appId);
+    return waitEndsAt !== undefined && performance.now() < waitEndsAt;
+  }
+
+  private startCheckWait(
+    appId: string,
+    { retryAfterMs }: { retryAfterMs: number },
+  ): void {
+    this.checkWaitEndsAt.set(appId, performance.now() + retryAfterMs);
+  }
+
+  private logNoUpdateReason(response: CreateCheckResponse): void {
+    if (response.retryAfterMs !== null) {
+      this.logger.info(
+        `No update available. The device is rate limited for ${response.retryAfterMs} ms.`,
+      );
+    } else if (
+      response.result === CheckResult.Skipped &&
+      response.reason !== null
+    ) {
+      this.logger.info(
+        `No update available. The check was skipped with the reason ${response.reason}.`,
+      );
+    } else if (response.result === CheckResult.UpToDate) {
+      this.logger.info('The app is up to date.');
+    } else {
+      this.logger.info('No update available.');
+    }
+  }
+
+  /**
+   * Records a failed download as the pending failure of the configured
+   * app, so that the next check reports it.
+   */
+  private async downloadBundleAndRecordFailure(
+    bundle: DownloadableBundle,
+  ): Promise<void> {
+    try {
+      await this.downloadBundleInternal(bundle);
+    } catch (error) {
+      const appId = this.getAppId();
+      const reason = getFailureReason(error);
+      if (appId !== null && reason !== null) {
+        await this.trySetPendingFailure({
+          appId,
+          bundleId: bundle.bundleId,
+          reason,
+        });
+      }
+      throw error;
+    }
+  }
+
+  private getPendingFailure(appId: string): UpdateFailure | null {
+    const failure = this.stateFile.get().pendingFailure;
+    return failure?.appId === appId ? failure : null;
+  }
+
+  /**
+   * A failure that cannot be stored is only logged, so that it never
+   * hides the error of the update itself.
+   */
+  private async trySetPendingFailure(failure: UpdateFailure): Promise<void> {
+    try {
+      await this.stateFile.update(s => {
+        s.pendingFailure = failure;
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to record the failed update: ${toLiveUpdateError(error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Keeps a failure that was recorded while the check was running.
+   */
+  private async removeReportedFailure(failure: UpdateFailure): Promise<void> {
+    const pendingFailure = this.stateFile.get().pendingFailure;
+    if (
+      pendingFailure?.appId !== failure.appId ||
+      pendingFailure.bundleId !== failure.bundleId ||
+      pendingFailure.reason !== failure.reason
+    ) {
+      return;
+    }
+    await this.stateFile.update(s => {
+      s.pendingFailure = null;
+    });
+  }
+
+  private async downloadBundleInternal(
+    bundle: DownloadableBundle,
+  ): Promise<void> {
     const stagingDirectory = await this.store.createStagingDirectory();
     try {
       const zipFilePath = join(stagingDirectory, 'bundle.zip');
       const extractDirectory = join(stagingDirectory, 'extracted');
-      const downloadResult = await downloadFile({
-        destinationPath: zipFilePath,
-        httpTimeout: this.httpTimeout,
-        onProgress: (downloadedBytes, totalBytes) => {
-          this.emit('downloadBundleProgress', {
-            bundleId: options.bundleId,
-            downloadedBytes,
-            progress: totalBytes > 0 ? downloadedBytes / totalBytes : 0,
-            totalBytes,
-          });
-        },
-        url: options.url,
-      });
-      await verifyDownloadedFile({
-        checksum: options.checksum ?? downloadResult.checksum,
-        filePath: zipFilePath,
-        publicKey: this.publicKey,
-        signature: options.signature ?? downloadResult.signature,
-      });
+      await this.downloadZipFile(bundle, { zipFilePath });
       await extractZip(zipFilePath, extractDirectory);
       const bundleRoot = await findIndexHtmlDirectory(extractDirectory);
       if (!bundleRoot) {
-        throw new LiveUpdateError(
-          'The bundle does not contain an index.html file.',
-        );
+        throw new LiveUpdateError(ERROR_BUNDLE_INDEX_HTML_MISSING);
       }
       const fileChecksums = await calculateContentChecksums(bundleRoot);
-      await this.store.add(options.bundleId, bundleRoot);
+      await this.store.add(bundle.bundleId, bundleRoot);
       await this.stateFile.update(s => {
-        s.bundles[options.bundleId] = { fileChecksums };
+        s.bundles[bundle.bundleId] = { fileChecksums };
       });
     } catch (error) {
       throw toLiveUpdateError(error);
     } finally {
       await this.store.cleanUpStaging(stagingDirectory);
     }
+  }
+
+  /**
+   * A bundle without a URL template is loaded from its plain address,
+   * with the checksum and signature of the bundle or else of the
+   * response headers.
+   */
+  private async downloadZipFile(
+    bundle: DownloadableBundle,
+    { zipFilePath }: { zipFilePath: string },
+  ): Promise<void> {
+    if (bundle.urlTemplate !== undefined && bundle.checksum !== undefined) {
+      await this.downloadZipFileWithUrlTemplate(
+        {
+          bundleId: bundle.bundleId,
+          checksum: bundle.checksum,
+          signature: bundle.signature,
+          urlTemplate: bundle.urlTemplate,
+        },
+        { zipFilePath },
+      );
+      return;
+    }
+    const downloadResult = await downloadFile({
+      destinationPath: zipFilePath,
+      httpTimeout: this.httpTimeout,
+      onProgress: this.createProgressListener(bundle.bundleId),
+      url: bundle.url,
+      userAgent: this.userAgent,
+    });
+    await verifyDownloadedFile({
+      checksum: bundle.checksum ?? downloadResult.checksum,
+      filePath: zipFilePath,
+      publicKey: this.publicKey,
+      signature: bundle.signature ?? downloadResult.signature,
+    });
+  }
+
+  /**
+   * Verified against the checksum and signature of the check.
+   */
+  private async downloadZipFileWithUrlTemplate(
+    bundle: {
+      bundleId: string;
+      checksum: string;
+      signature?: string;
+      urlTemplate: string;
+    },
+    { zipFilePath }: { zipFilePath: string },
+  ): Promise<void> {
+    await downloadFileWithoutCompression({
+      destinationPath: zipFilePath,
+      httpTimeout: this.httpTimeout,
+      onProgress: this.createProgressListener(bundle.bundleId),
+      url: buildFileUrl({
+        checksum: bundle.checksum,
+        urlTemplate: bundle.urlTemplate,
+      }),
+      userAgent: this.userAgent,
+    });
+    await verifyFileFromUrlTemplate({
+      checksum: bundle.checksum,
+      filePath: zipFilePath,
+      publicKey: this.publicKey,
+      signature: bundle.signature,
+    });
+  }
+
+  private createProgressListener(
+    bundleId: string,
+  ): (downloadedBytes: number, totalBytes: number) => void {
+    return (downloadedBytes, totalBytes) => {
+      this.emit('downloadBundleProgress', {
+        bundleId,
+        downloadedBytes,
+        progress: totalBytes > 0 ? downloadedBytes / totalBytes : 0,
+        totalBytes,
+      });
+    };
   }
 
   private async setNextBundleInternal(bundleId: string | null): Promise<void> {
@@ -1154,6 +1363,14 @@ export class LiveUpdateEngine {
       }
     });
     this.rollbackPerformed = true;
+    const appId = this.getAppId();
+    if (appId !== null) {
+      await this.trySetPendingFailure({
+        appId,
+        bundleId: failedBundleId,
+        reason: FailureReason.ReadinessTimedOut,
+      });
+    }
     this.emit('rolledBack', {
       currentBundleId: null,
       previousBundleId: failedBundleId,
@@ -1179,5 +1396,38 @@ export class LiveUpdateEngine {
         }
       }
     }
+  }
+}
+
+function assertSupportedArtifactType(bundle: CreateCheckResponseBundle): void {
+  if (bundle.artifactType !== 'zip') {
+    throw new LiveUpdateError(
+      'The artifact type is not supported by this SDK.',
+    );
+  }
+}
+
+/**
+ * Returns `null` for an error that is not reported to Capawesome Cloud.
+ */
+function getFailureReason(error: unknown): FailureReason | null {
+  if (!(error instanceof LiveUpdateError)) {
+    return null;
+  }
+  if (error.code === ErrorCode.RequestFailed) {
+    return FailureReason.DownloadFailed;
+  }
+  switch (error.message) {
+    case ERROR_BUNDLE_EXTRACTION_FAILED:
+    case ERROR_BUNDLE_INDEX_HTML_MISSING:
+      return FailureReason.BundleInvalid;
+    case ERROR_CHECKSUM_MISMATCH:
+      return FailureReason.ChecksumMismatched;
+    case ERROR_PUBLIC_KEY_INVALID:
+    case ERROR_SIGNATURE_MISSING:
+    case ERROR_SIGNATURE_VERIFICATION_FAILED:
+      return FailureReason.SignatureVerificationFailed;
+    default:
+      return null;
   }
 }

@@ -61,7 +61,6 @@ import { resolveServedFile } from './serving';
 const DEFAULT_SCHEME = 'capawesome-live-update';
 const SERVE_HOST = 'bundle';
 const AUTO_UPDATE_MIN_INTERVAL = 15 * 60 * 1000;
-const ELECTRON_PLATFORM = '2';
 const ELECTRON_RUNTIME = 'electron';
 
 const defaultLogger: LiveUpdateLogger = {
@@ -97,7 +96,6 @@ class ElectronLiveUpdateHost implements LiveUpdateHost {
       httpTimeout: config.httpTimeout,
       logger: this.logger,
       osVersion: process.getSystemVersion(),
-      platform: ELECTRON_PLATFORM,
       pluginVersion: __SDK_VERSION__,
       publicKey: config.publicKey,
       readyTimeout: config.readyTimeout,

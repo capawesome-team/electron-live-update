@@ -176,10 +176,7 @@ export interface FetchLatestBundleResult {
    */
   channel?: string;
   /**
-   * The checksum of the latest bundle if the bundle is self-hosted.
-   *
-   * If the bundle is hosted on Capawesome Cloud, the checksum will be
-   * returned as response header when downloading the bundle.
+   * The checksum of the latest bundle, if the answer of the check carries one.
    *
    * @since 0.1.0
    */
@@ -199,10 +196,7 @@ export interface FetchLatestBundleResult {
    */
   downloadUrl?: string;
   /**
-   * The signature of the latest bundle if the bundle is self-hosted.
-   *
-   * If the bundle is hosted on Capawesome Cloud, the signature will be
-   * returned as response header when downloading the bundle.
+   * The signature of the latest bundle, if the answer of the check carries one.
    *
    * @since 0.1.0
    */

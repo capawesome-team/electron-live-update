@@ -2,7 +2,11 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { assertSecureUrl, downloadFile } from '../src/engine/download';
+import {
+  assertSecureUrl,
+  downloadFile,
+  downloadFileWithoutCompression,
+} from '../src/engine/download';
 import { ErrorCode } from '../src/engine/errors';
 
 import {
@@ -10,6 +14,8 @@ import {
   createTemporaryDirectory,
   removeDirectory,
 } from './helpers';
+
+const USER_AGENT = 'capawesome-electron-live-update/0.0.1 (electron)';
 
 describe('assertSecureUrl', () => {
   it('allows https URLs', () => {
@@ -79,6 +85,7 @@ describe('downloadFile', () => {
       onProgress: (downloadedBytes, totalBytes) =>
         progressEvents.push({ downloadedBytes, totalBytes }),
       url: `${server.origin}/bundle.zip`,
+      userAgent: USER_AGENT,
     });
     expect((await readFile(destinationPath)).equals(payload)).toBe(true);
     expect(progressEvents.length).toBeGreaterThan(0);
@@ -96,6 +103,7 @@ describe('downloadFile', () => {
       destinationPath: join(workingDirectory, 'bundle.zip'),
       httpTimeout: 5000,
       url: `${server.origin}/bundle.zip`,
+      userAgent: USER_AGENT,
     });
     expect(result.checksum).toBe('abc123');
     expect(result.signature).toBe('ZmFrZQ==');
@@ -110,6 +118,7 @@ describe('downloadFile', () => {
       destinationPath: join(workingDirectory, 'bundle.zip'),
       httpTimeout: 5000,
       url: `${server.origin}/bundle.zip`,
+      userAgent: USER_AGENT,
     });
     // An empty header must not be collapsed to undefined: a present-but-
     // empty value flows into verification and rejects there.
@@ -124,6 +133,7 @@ describe('downloadFile', () => {
         destinationPath: join(workingDirectory, 'bundle.zip'),
         httpTimeout: 5000,
         url: `${server.origin}/bundle.zip`,
+        userAgent: USER_AGENT,
       }),
     ).rejects.toMatchObject({
       code: ErrorCode.RequestFailed,
@@ -140,6 +150,7 @@ describe('downloadFile', () => {
         destinationPath: join(workingDirectory, 'bundle.zip'),
         httpTimeout: 5000,
         url: `${stoppedServer.origin}/bundle.zip`,
+        userAgent: USER_AGENT,
       }),
     ).rejects.toMatchObject({
       code: ErrorCode.RequestFailed,
@@ -167,6 +178,7 @@ describe('downloadFile', () => {
       destinationPath,
       httpTimeout: 300,
       url: `${server.origin}/bundle.zip`,
+      userAgent: USER_AGENT,
     });
     expect(await readFile(destinationPath, 'utf8')).toBe('xxxxx');
   });
@@ -182,6 +194,7 @@ describe('downloadFile', () => {
         destinationPath: join(workingDirectory, 'bundle.zip'),
         httpTimeout: 200,
         url: `${server.origin}/bundle.zip`,
+        userAgent: USER_AGENT,
       }),
     ).rejects.toMatchObject({
       code: ErrorCode.RequestFailed,
@@ -195,7 +208,22 @@ describe('downloadFile', () => {
         destinationPath: join(workingDirectory, 'bundle.zip'),
         httpTimeout: 5000,
         url: 'http://example.com/bundle.zip',
+        userAgent: USER_AGENT,
       }),
     ).rejects.toThrowError('Bundles must be downloaded via HTTPS.');
+  });
+
+  it('downloads without compression and with the user agent only', async () => {
+    server.route('/bundle.zip', { body: 'data' });
+    await downloadFileWithoutCompression({
+      destinationPath: join(workingDirectory, 'bundle.zip'),
+      httpTimeout: 5000,
+      url: `${server.origin}/bundle.zip`,
+      userAgent: USER_AGENT,
+    });
+    const headers = server.requests[0]?.headers;
+    expect(headers?.['accept-encoding']).toBe('identity');
+    expect(headers?.['user-agent']).toBe(USER_AGENT);
+    expect(headers?.['x-capawesome-device-id']).toBeUndefined();
   });
 });

@@ -1,205 +1,102 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CloudApiClient } from '../src/engine/api-client';
+import {
+  CloudApiClient,
+  type CreateCheckRequest,
+} from '../src/engine/api-client';
 import { ErrorCode } from '../src/engine/errors';
+import { FailureReason } from '../src/engine/state-file';
 
 import { MockServer } from './helpers';
+
+const USER_AGENT = 'capawesome-electron-live-update/0.0.1 (electron)';
 
 describe('CloudApiClient', () => {
   let server: MockServer;
   let client: CloudApiClient;
 
-  const request = {
+  const request: CreateCheckRequest = {
     appId: 'app-123',
     appVersionCode: '42',
     appVersionName: '1.2.3',
-    bundleId: '1.0.0' as string | null,
-    channelName: 'production' as string | null,
-    customId: 'user-1' as string | null,
+    bundleId: '1.0.0',
+    channelName: 'production',
+    customId: 'user-1',
     deviceId: 'device-1',
+    failure: null,
     osVersion: '25.5.0',
-    platform: '2',
     pluginVersion: '0.0.1',
-    runtime: 'electron' as string | null,
+    runtime: 'electron',
   };
+
+  function createClient(options: { httpTimeout: number; origin: string }) {
+    return new CloudApiClient({
+      httpTimeout: options.httpTimeout,
+      serverDomain: options.origin.replace('http://', ''),
+      userAgent: USER_AGENT,
+    });
+  }
 
   beforeEach(async () => {
     server = new MockServer();
     await server.start();
-    client = new CloudApiClient({
-      httpTimeout: 5000,
-      serverDomain: server.origin.replace('http://', ''),
-    });
+    client = createClient({ httpTimeout: 5000, origin: server.origin });
   });
 
   afterEach(async () => {
     await server.stop();
   });
 
-  it('requests the latest bundle with the exact protocol query parameters', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', {
-      body: JSON.stringify({
-        bundleId: '1.1.0',
-        url: 'https://example.com/bundle.zip',
-      }),
-      headers: { 'Content-Type': 'application/json' },
+  describe('fetchCheck', () => {
+    it('posts the check with the user agent and without the device id header', async () => {
+      server.route('/v1/live-updates/apps/app-123/checks', {
+        body: JSON.stringify({ result: 'up_to_date', bundle: null }),
+      });
+      await client.fetchCheck({
+        ...request,
+        failure: {
+          appId: 'app-123',
+          bundleId: '0.9.0',
+          reason: FailureReason.DownloadFailed,
+        },
+      });
+      const recorded = server.requests[0];
+      expect(recorded?.method).toBe('POST');
+      expect(recorded?.headers['content-type']).toBe('application/json');
+      expect(recorded?.headers['user-agent']).toBe(USER_AGENT);
+      expect(recorded?.headers['x-capawesome-device-id']).toBeUndefined();
+      expect(JSON.parse(recorded?.body ?? '').failure).toEqual({
+        bundleId: '0.9.0',
+        reason: 'download_failed',
+      });
     });
-    await client.getLatestBundle(request);
-    expect(server.requests).toHaveLength(1);
-    const recorded = server.requests[0];
-    expect(recorded?.url.pathname).toBe('/v1/apps/app-123/bundles/latest');
-    const params = recorded?.url.searchParams;
-    expect(params?.get('appVersionCode')).toBe('42');
-    expect(params?.get('appVersionName')).toBe('1.2.3');
-    expect(params?.get('bundleId')).toBe('1.0.0');
-    expect(params?.get('channelName')).toBe('production');
-    expect(params?.get('customId')).toBe('user-1');
-    expect(params?.get('deviceId')).toBe('device-1');
-    expect(params?.get('osVersion')).toBe('25.5.0');
-    expect(params?.get('platform')).toBe('2');
-    expect(params?.get('pluginVersion')).toBe('0.0.1');
-    expect(params?.get('runtime')).toBe('electron');
-    expect([...(params?.keys() ?? [])].sort()).toEqual([
-      'appVersionCode',
-      'appVersionName',
-      'bundleId',
-      'channelName',
-      'customId',
-      'deviceId',
-      'osVersion',
-      'platform',
-      'pluginVersion',
-      'runtime',
-    ]);
-    expect(recorded?.headers['x-capawesome-device-id']).toBe('device-1');
-  });
 
-  it('omits null query parameters', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', {
-      body: JSON.stringify({
-        bundleId: '1.1.0',
-        url: 'https://example.com/bundle.zip',
-      }),
+    it('rejects with REQUEST_FAILED and the reason on network errors', async () => {
+      const stoppedServer = new MockServer();
+      await stoppedServer.start();
+      await stoppedServer.stop();
+      const unreachableClient = createClient({
+        httpTimeout: 5000,
+        origin: stoppedServer.origin,
+      });
+      await expect(unreachableClient.fetchCheck(request)).rejects.toMatchObject(
+        {
+          code: ErrorCode.RequestFailed,
+          message: expect.stringContaining('ECONNREFUSED'),
+        },
+      );
     });
-    await client.getLatestBundle({
-      ...request,
-      bundleId: null,
-      channelName: null,
-      customId: null,
-      runtime: null,
-    });
-    const params = server.requests[0]?.url.searchParams;
-    expect(params?.has('bundleId')).toBe(false);
-    expect(params?.has('channelName')).toBe(false);
-    expect(params?.has('customId')).toBe(false);
-    expect(params?.has('runtime')).toBe(false);
-  });
 
-  it('parses the full response', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', {
-      body: JSON.stringify({
-        artifactType: 'zip',
-        bundleId: '1.1.0',
-        channelName: 'beta',
-        checksum: 'abc',
-        customProperties: { key: 'value' },
-        signature: 'sig',
-        url: 'https://example.com/bundle.zip',
-      }),
-    });
-    const response = await client.getLatestBundle(request);
-    expect(response).toEqual({
-      artifactType: 'zip',
-      bundleId: '1.1.0',
-      channelName: 'beta',
-      checksum: 'abc',
-      customProperties: { key: 'value' },
-      signature: 'sig',
-      url: 'https://example.com/bundle.zip',
-    });
-  });
-
-  it('defaults the artifact type to zip', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', {
-      body: JSON.stringify({
-        bundleId: '1.1.0',
-        url: 'https://example.com/b.zip',
-      }),
-    });
-    const response = await client.getLatestBundle(request);
-    expect(response?.artifactType).toBe('zip');
-  });
-
-  it('throws for non-zip artifact types', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', {
-      body: JSON.stringify({
-        artifactType: 'manifest',
-        bundleId: '1.1.0',
-        url: 'https://example.com/b',
-      }),
-    });
-    await expect(client.getLatestBundle(request)).rejects.toMatchObject({
-      message: 'The artifact type is not supported by this SDK.',
-    });
-  });
-
-  it('returns null on 400', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', {
-      body: JSON.stringify({ message: 'Invalid app version.' }),
-      status: 400,
-    });
-    expect(await client.getLatestBundle(request)).toBeNull();
-  });
-
-  it('returns null on 404', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', {
-      body: 'not found',
-      status: 404,
-    });
-    expect(await client.getLatestBundle(request)).toBeNull();
-  });
-
-  it('returns null on server errors', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', {
-      body: 'boom',
-      status: 500,
-    });
-    expect(await client.getLatestBundle(request)).toBeNull();
-  });
-
-  it('throws REQUEST_FAILED with the reason on network errors', async () => {
-    const stoppedServer = new MockServer();
-    await stoppedServer.start();
-    await stoppedServer.stop();
-    const unreachableClient = new CloudApiClient({
-      httpTimeout: 5000,
-      serverDomain: stoppedServer.origin.replace('http://', ''),
-    });
-    await expect(
-      unreachableClient.getLatestBundle(request),
-    ).rejects.toMatchObject({
-      code: ErrorCode.RequestFailed,
-      message: expect.stringContaining('ECONNREFUSED'),
-    });
-  });
-
-  it('throws REQUEST_FAILED when the request times out', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', () => null);
-    const slowClient = new CloudApiClient({
-      httpTimeout: 200,
-      serverDomain: server.origin.replace('http://', ''),
-    });
-    await expect(slowClient.getLatestBundle(request)).rejects.toMatchObject({
-      code: ErrorCode.RequestFailed,
-      message: 'Request timed out.',
-    });
-  });
-
-  it('throws on a malformed JSON body', async () => {
-    server.route('/v1/apps/app-123/bundles/latest', { body: 'not json' });
-    await expect(client.getLatestBundle(request)).rejects.toMatchObject({
-      code: undefined,
-      message: 'An unknown error has occurred.',
+    it('rejects with REQUEST_FAILED when the request times out', async () => {
+      server.route('/v1/live-updates/apps/app-123/checks', () => null);
+      const slowClient = createClient({
+        httpTimeout: 200,
+        origin: server.origin,
+      });
+      await expect(slowClient.fetchCheck(request)).rejects.toMatchObject({
+        code: ErrorCode.RequestFailed,
+        message: 'Request timed out.',
+      });
     });
   });
 
@@ -229,6 +126,7 @@ describe('CloudApiClient', () => {
       expect(params?.get('limit')).toBe('10');
       expect(params?.get('offset')).toBe('5');
       expect(params?.get('query')).toBe('prod');
+      expect(recorded?.headers['user-agent']).toBe(USER_AGENT);
       expect(recorded?.headers['x-capawesome-device-id']).toBe('device-1');
     });
 

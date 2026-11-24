@@ -21,15 +21,46 @@ export async function calculateFileChecksum(filePath: string): Promise<string> {
   }
 }
 
+/**
+ * The placeholder of a URL template for the SHA-256 checksum of a file.
+ */
+export const CHECKSUM_PLACEHOLDER = '{checksum}';
+
+export const ERROR_CHECKSUM_MISMATCH = 'Checksum mismatch.';
+export const ERROR_PUBLIC_KEY_INVALID = 'Invalid public key.';
+export const ERROR_SIGNATURE_MISSING = 'Bundle does not contain a signature.';
+export const ERROR_SIGNATURE_VERIFICATION_FAILED =
+  'Signature verification failed.';
+
+/**
+ * A key that Node.js cannot read as it is, such as a key in one line
+ * without line breaks, is read from its base64 content, as on Android and iOS.
+ */
 export function parsePublicKey(publicKeyPem: string): KeyObject {
   try {
-    const key = createPublicKey(publicKeyPem);
+    const key = createPublicKeyFromText(publicKeyPem);
     if (key.asymmetricKeyType !== 'rsa') {
       throw new Error('Not an RSA key.');
     }
     return key;
   } catch {
-    throw new LiveUpdateError('Invalid public key.');
+    throw new LiveUpdateError(ERROR_PUBLIC_KEY_INVALID);
+  }
+}
+
+function createPublicKeyFromText(publicKeyPem: string): KeyObject {
+  try {
+    return createPublicKey(publicKeyPem);
+  } catch {
+    const base64Key = publicKeyPem
+      .replace('-----BEGIN PUBLIC KEY-----', '')
+      .replace('-----END PUBLIC KEY-----', '')
+      .replace(/\s/g, '');
+    return createPublicKey({
+      format: 'der',
+      key: Buffer.from(base64Key, 'base64'),
+      type: 'spki',
+    });
   }
 }
 
@@ -57,7 +88,7 @@ export async function verifyFileSignature(
     valid = false;
   }
   if (!valid) {
-    throw new LiveUpdateError('Signature verification failed.');
+    throw new LiveUpdateError(ERROR_SIGNATURE_VERIFICATION_FAILED);
   }
 }
 
@@ -95,20 +126,66 @@ export async function verifyDownloadedFile(
   options: VerifyDownloadedFileOptions,
 ): Promise<void> {
   if (options.publicKey) {
-    const publicKey = parsePublicKey(options.publicKey);
-    if (options.signature === undefined) {
-      throw new LiveUpdateError('Bundle does not contain a signature.');
-    }
-    await verifyFileSignature(options.filePath, options.signature, publicKey);
+    await verifySignature(options.filePath, {
+      publicKey: options.publicKey,
+      signature: options.signature,
+    });
     return;
   }
-  const expectedChecksum = options.checksum?.toLowerCase();
-  if (expectedChecksum !== undefined) {
-    const actualChecksum = await calculateFileChecksum(options.filePath);
-    if (actualChecksum !== expectedChecksum) {
-      throw new LiveUpdateError('Checksum mismatch.');
-    }
+  if (options.checksum !== undefined) {
+    await verifyChecksum(options.filePath, { checksum: options.checksum });
   }
+}
+
+/**
+ * Verify the zip file of a bundle that was loaded from its URL
+ * template: the checksum always, and the signature as well if a
+ * public key is configured.
+ */
+export async function verifyFileFromUrlTemplate(options: {
+  checksum: string;
+  filePath: string;
+  publicKey?: string;
+  signature?: string;
+}): Promise<void> {
+  await verifyChecksum(options.filePath, { checksum: options.checksum });
+  if (options.publicKey) {
+    await verifySignature(options.filePath, {
+      publicKey: options.publicKey,
+      signature: options.signature,
+    });
+  }
+}
+
+/**
+ * Replaces every placeholder on the text of the template.
+ */
+export function buildFileUrl(options: {
+  checksum: string;
+  urlTemplate: string;
+}): string {
+  return options.urlTemplate.replaceAll(CHECKSUM_PLACEHOLDER, options.checksum);
+}
+
+async function verifyChecksum(
+  filePath: string,
+  options: { checksum: string },
+): Promise<void> {
+  const actualChecksum = await calculateFileChecksum(filePath);
+  if (actualChecksum !== options.checksum.toLowerCase()) {
+    throw new LiveUpdateError(ERROR_CHECKSUM_MISMATCH);
+  }
+}
+
+async function verifySignature(
+  filePath: string,
+  options: { publicKey: string; signature: string | undefined },
+): Promise<void> {
+  const publicKey = parsePublicKey(options.publicKey);
+  if (options.signature === undefined) {
+    throw new LiveUpdateError(ERROR_SIGNATURE_MISSING);
+  }
+  await verifyFileSignature(filePath, options.signature, publicKey);
 }
 
 /**

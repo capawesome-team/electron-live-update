@@ -2,7 +2,8 @@
  * Mock Capawesome Cloud server for the example app and the e2e suite.
  *
  * Speaks the Live Update protocol:
- * - GET  /v1/apps/{appId}/bundles/latest  -> latest bundle JSON or 404
+ * - POST /v1/live-updates/apps/{appId}/checks -> an available bundle or
+ *                                               up to date
  * - GET  /v1/apps/{appId}/channels        -> list of channels (or 401 when
  *                                            CHANNELS_DISABLED is set)
  * - GET  /download/{file}                 -> zip bytes with X-Checksum
@@ -74,19 +75,23 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (
-    request.method === 'GET' &&
-    /^\/v1\/apps\/[^/]+\/bundles\/latest$/.test(url.pathname)
+    request.method === 'POST' &&
+    /^\/v1\/live-updates\/apps\/[^/]+\/checks$/.test(url.pathname)
   ) {
     const bundle =
       latestBundleId === null ? undefined : bundles[latestBundleId];
     if (!bundle) {
-      sendJson(response, 404, { message: 'No bundle available.' });
+      sendJson(response, 200, { bundle: null, result: 'up_to_date' });
       return;
     }
+    // The plain url makes the SDK read X-Checksum and X-Signature.
     sendJson(response, 200, {
-      artifactType: 'zip',
-      bundleId: latestBundleId,
-      url: `http://localhost:${port}/download/${bundle.file}`,
+      bundle: {
+        artifactType: 'zip',
+        id: latestBundleId,
+        url: `http://localhost:${port}/download/${bundle.file}`,
+      },
+      result: 'available',
     });
     return;
   }

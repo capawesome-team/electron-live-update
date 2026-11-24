@@ -38,6 +38,36 @@ export interface PendingBootMarker {
   bundleId: string;
 }
 
+/**
+ * Why an update failed, as reported to Capawesome Cloud.
+ */
+export enum FailureReason {
+  /**
+   * The app ended before it called `ready()`, and the engine rolled back at the next start.
+   */
+  AppCrashed = 'app_crashed',
+  /**
+   * The zip file cannot be read, or the bundle has no `index.html`.
+   */
+  BundleInvalid = 'bundle_invalid',
+  ChecksumMismatched = 'checksum_mismatched',
+  DownloadFailed = 'download_failed',
+  /**
+   * The app did not call `ready()` in time, and the engine rolled back.
+   */
+  ReadinessTimedOut = 'readiness_timed_out',
+  SignatureVerificationFailed = 'signature_verification_failed',
+}
+
+/**
+ * A failed update that is sent with the next check of its app.
+ */
+export interface UpdateFailure {
+  appId: string;
+  bundleId: string;
+  reason: FailureReason;
+}
+
 export interface PersistedState {
   /**
    * The app ID set via `setConfig()`. Overrides the configured app ID.
@@ -55,6 +85,10 @@ export interface PersistedState {
   lastVersionCode: string | null;
   nextBundleId: string | null;
   pendingBoot: PendingBootMarker | null;
+  /**
+   * The last failed update that was not reported yet.
+   */
+  pendingFailure: UpdateFailure | null;
   previousBundleId: string | null;
 }
 
@@ -72,8 +106,27 @@ function createDefaultState(): PersistedState {
     lastVersionCode: null,
     nextBundleId: null,
     pendingBoot: null,
+    pendingFailure: null,
     previousBundleId: null,
   };
+}
+
+function normalizeUpdateFailure(raw: unknown): UpdateFailure | null {
+  if (typeof raw !== 'object' || raw === null) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const reason = Object.values(FailureReason).find(
+    value => value === record.reason,
+  );
+  if (
+    typeof record.appId !== 'string' ||
+    typeof record.bundleId !== 'string' ||
+    reason === undefined
+  ) {
+    return null;
+  }
+  return { appId: record.appId, bundleId: record.bundleId, reason };
 }
 
 function normalizeState(raw: unknown): PersistedState {
@@ -143,6 +196,7 @@ function normalizeState(raw: unknown): PersistedState {
       state.pendingBoot = { bundleId: marker.bundleId };
     }
   }
+  state.pendingFailure = normalizeUpdateFailure(record.pendingFailure);
   if (typeof record.previousBundleId === 'string') {
     state.previousBundleId = record.previousBundleId;
   }
