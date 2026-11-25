@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/capawesome-team/electron-live-update/compare/v0.3.0...v0.3.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* log one line when no check is made during a wait ([#14](https://github.com/capawesome-team/electron-live-update/issues/14)) ([0b65d07](https://github.com/capawesome-team/electron-live-update/commit/0b65d076e59af0ecb97cc19ad816615668be1bef))
+
 ## [0.3.0](https://github.com/capawesome-team/electron-live-update/compare/v0.2.0...v0.3.0) (2026-11-24)
 
 
