@@ -547,7 +547,6 @@ export class LiveUpdateEngine {
       const response = await this.fetchCheck(options?.channel);
       const bundle = response.bundle;
       if (response.result !== CheckResult.Available || bundle === null) {
-        this.logNoUpdateReason(response);
         return { nextBundleId: null };
       }
       assertValidBundleId(bundle.id);
@@ -591,9 +590,6 @@ export class LiveUpdateEngine {
   ): Promise<FetchLatestBundleResult> {
     this.assertInitialized();
     const response = await this.fetchCheck(options?.channel);
-    if (response.result !== CheckResult.Available) {
-      this.logNoUpdateReason(response);
-    }
     const bundle = response.bundle;
     if (bundle === null) {
       return { bundleId: null };
@@ -996,6 +992,9 @@ export class LiveUpdateEngine {
     } else if (failure !== null) {
       // Every answer without a wait that did not reject is a 200.
       await this.removeReportedFailure(failure);
+    }
+    if (response.result !== CheckResult.Available) {
+      this.logNoUpdateReason(response);
     }
     return response;
   }
